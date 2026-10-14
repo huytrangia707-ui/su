@@ -1,0 +1,1831 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bến Nhà Rồng 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600&family=JetBrains+Mono:wght@500&family=Spectral:ital,wght@0,500;0,700;1,500&display=swap">
+<style>
+/* Layout: full-bleed WebGL scene; HUD in corners; archival info drawer slides from the right (bottom sheet on phones). Single deliberate dark look: river at dusk + ochre plaster + celadon glaze. */
+:root{
+  --ink:#0d1719;          /* river-night ink, panel ground */
+  --ink-2:#142326;
+  --glass:rgba(13,23,25,.82);
+  --line:rgba(231,214,173,.16);
+  --paper:#ece3cf;        /* text */
+  --muted:#9fb1ab;
+  --ochre:#d8a443;        /* plaster wall ochre (accent) */
+  --celadon:#73b8a3;      /* glazed-dragon green (visited / ok) */
+  --tile:#b4553c;         /* roof tile red */
+  --f-display:"Spectral", "Noto Serif", Georgia, serif;
+  --f-body:"Be Vietnam Pro", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme:dark;
+}
+html,body{height:100%;}
+body{background:var(--ink);color:var(--paper);font-family:var(--f-body);overflow:hidden;margin:0;}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;outline:none;touch-action:none;}
+.hud{position:fixed;pointer-events:none;z-index:5;}
+.chip{display:inline-flex;align-items:center;gap:.4em;padding:.28em .6em;border:1px solid var(--line);border-radius:3px;background:var(--glass);font-size:12px;letter-spacing:.02em;}
+button{font-family:var(--f-body);cursor:pointer;}
+button:focus-visible,a:focus-visible{outline:2px solid var(--ochre);outline-offset:2px;}
+
+/* top-left identity + readouts */
+#brand{top:calc(14px + env(safe-area-inset-top,0px));left:16px;display:grid;gap:8px;max-width:min(360px,60vw);}
+#brand h1{font-family:var(--f-display);font-weight:700;font-size:22px;line-height:1.05;margin:0;text-wrap:balance;text-shadow:0 1px 8px rgba(0,0,0,.55);}
+#brand h1 small{display:block;font:500 11px/1.4 var(--f-body);letter-spacing:.14em;text-transform:uppercase;color:var(--ochre);margin-bottom:2px;}
+#readout{display:flex;flex-wrap:wrap;gap:6px;}
+#xyz{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:12px;}
+#xyz b{color:var(--ochre);font-weight:500;margin-right:2px;}
+#modeChip i{width:7px;height:7px;border-radius:50%;background:var(--celadon);display:inline-block;}
+#progress b{color:var(--celadon);font-weight:600;}
+
+/* minimap */
+#mapWrap{top:calc(14px + env(safe-area-inset-top,0px));right:16px;display:grid;gap:6px;justify-items:end;}
+#minimap{width:168px;height:168px;border:1px solid var(--line);border-radius:4px;background:var(--glass);}
+#floorLbl{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}
+
+/* crosshair + aim hint */
+#cross{left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;}
+#cross::before,#cross::after{content:"";position:absolute;background:rgba(236,227,207,.85);box-shadow:0 0 3px rgba(0,0,0,.6);}
+#cross::before{left:10px;top:3px;width:2px;height:16px;}
+#cross::after{top:10px;left:3px;height:2px;width:16px;}
+#cross.on::before,#cross.on::after{background:var(--ochre);}
+#cross.on{transform:rotate(45deg);transition:transform .15s;}
+#aim{left:50%;top:calc(50% + 26px);transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .15s;}
+#aim.show{opacity:1;}
+#aim .chip{font-size:13px;}
+#aim kbd{font-family:var(--f-mono);font-size:11px;border:1px solid var(--line);border-radius:3px;padding:0 .35em;color:var(--ochre);}
+
+/* bottom bar */
+#bar{left:16px;right:16px;bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;justify-content:space-between;}
+#hint{font-size:12px;color:var(--muted);max-width:60ch;}
+#hint kbd{font-family:var(--f-mono);font-size:11px;color:var(--paper);border:1px solid var(--line);border-radius:3px;padding:0 .3em;}
+#tools{display:flex;flex-wrap:wrap;gap:6px;pointer-events:auto;}
+.tbtn{background:var(--glass);color:var(--paper);border:1px solid var(--line);border-radius:3px;padding:.45em .75em;font-size:12px;}
+.tbtn:hover{border-color:var(--ochre);}
+.tbtn[aria-pressed="true"]{background:var(--ochre);color:#1d1406;border-color:var(--ochre);}
+
+/* free-mouse notice */
+#freeNote{left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translateX(-50%);}
+#freeNote .chip{border-color:rgba(216,164,67,.5);}
+
+/* info drawer */
+#info{position:fixed;z-index:20;top:0;right:0;bottom:0;width:min(440px,100%);background:linear-gradient(180deg,var(--ink-2),var(--ink));border-left:1px solid var(--line);box-shadow:-20px 0 60px rgba(0,0,0,.45);transform:translateX(102%);transition:transform .28s cubic-bezier(.2,.7,.2,1);display:flex;flex-direction:column;}
+#info.open{transform:none;}
+#infoScroll{overflow-y:auto;padding:calc(22px + env(safe-area-inset-top,0px)) 26px 22px;display:grid;gap:14px;align-content:start;flex:1;}
+#infoTag{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--celadon);}
+#infoYear{font-family:var(--f-display);font-weight:500;font-style:italic;font-size:44px;line-height:1;color:var(--ochre);font-variant-numeric:lining-nums;}
+#infoTitle{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.15;margin:0;text-wrap:balance;}
+#infoBody{display:grid;gap:10px;font-size:14.5px;line-height:1.65;color:#d9d1bf;max-width:62ch;}
+#infoBody p{margin:0;}
+#infoFacts{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;padding:12px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:13px;}
+#infoFacts dt{color:var(--muted);}
+#infoFacts dd{margin:0;min-width:0;}
+#infoNote{font-size:12px;color:var(--muted);font-style:italic;}
+#infoSrc{font-size:12px;color:var(--muted);display:grid;gap:4px;}
+#infoSrc a{color:var(--celadon);text-decoration-thickness:1px;text-underline-offset:2px;word-break:break-word;}
+#infoFoot{padding:14px 26px calc(16px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;}
+#closeInfo{flex:1;background:var(--ochre);color:#1d1406;border:0;border-radius:3px;padding:.8em 1em;font-weight:600;font-size:14px;}
+#closeInfo small{font-weight:500;opacity:.75;}
+#xInfo{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));right:14px;background:none;border:1px solid var(--line);color:var(--paper);width:32px;height:32px;border-radius:3px;font-size:16px;line-height:1;}
+
+/* start / menu overlay */
+#start{position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:16px;background:radial-gradient(ellipse at 30% 20%,rgba(20,35,38,.55),rgba(8,14,15,.88));overflow-y:auto;}
+#start[hidden]{display:none!important;}
+.card{width:min(760px,100%);background:var(--glass);border:1px solid var(--line);border-radius:6px;padding:26px 26px 22px;display:grid;gap:18px;backdrop-filter:blur(6px);}
+.card h2{font-family:var(--f-display);font-weight:700;font-size:clamp(28px,5vw,42px);line-height:1.02;margin:0;text-wrap:balance;}
+.card h2 span{display:block;font:500 12px/1.4 var(--f-body);letter-spacing:.16em;text-transform:uppercase;color:var(--ochre);margin-bottom:8px;}
+.lead{margin:0;font-size:15px;line-height:1.6;color:#d9d1bf;max-width:62ch;}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;}
+.cols h3{margin:0 0 6px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:13px;margin:0;}
+.keys dt{font-family:var(--f-mono);font-size:12px;color:var(--ochre);white-space:nowrap;}
+.keys dd{margin:0;}
+.go{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+#startBtn{background:var(--ochre);color:#1d1406;border:0;border-radius:3px;padding:.85em 1.4em;font-weight:600;font-size:15px;}
+.disclaim{font-size:12px;color:var(--muted);margin:0;max-width:70ch;line-height:1.5;}
+#tpList,#exList{display:flex;flex-wrap:wrap;gap:6px;}
+#exList .tbtn{font-size:11.5px;}
+#tip{left:0;top:0;opacity:0;transition:opacity .12s;white-space:nowrap;}
+#tip.show{opacity:1;}
+#tip .chip{border-color:rgba(216,164,67,.6);font-size:13px;}
+#speedChip b{color:var(--ochre);font-weight:600;font-variant-numeric:tabular-nums;}
+#c.grab{cursor:grabbing;} #c.hov{cursor:pointer;} #c.nocur{cursor:none;}
+#loadErr{color:#f0b3a0;font-size:13px;}
+
+/* touch controls */
+#touch{position:fixed;inset:0;z-index:6;pointer-events:none;}
+#stick{position:absolute;left:22px;bottom:calc(84px + env(safe-area-inset-bottom,0px));width:120px;height:120px;border-radius:50%;border:1px solid var(--line);background:rgba(13,23,25,.45);pointer-events:auto;touch-action:none;}
+#knob{position:absolute;left:38px;top:38px;width:44px;height:44px;border-radius:50%;background:rgba(216,164,67,.75);}
+#vbtns{position:absolute;right:20px;bottom:calc(90px + env(safe-area-inset-bottom,0px));display:grid;gap:10px;pointer-events:auto;}
+#vbtns button{width:56px;height:56px;border-radius:50%;border:1px solid var(--line);background:rgba(13,23,25,.6);color:var(--paper);font-size:12px;touch-action:none;}
+
+@media (max-width:640px){
+  #brand h1{font-size:18px;}
+  #minimap{width:112px;height:112px;}
+  #info{top:auto;height:72%;width:100%;border-left:0;border-top:1px solid var(--line);transform:translateY(102%);}
+  #info.open{transform:none;}
+  #hint{display:none;}
+  .card{padding:20px 18px;}
+}
+@media (prefers-reduced-motion:reduce){ #info{transition:none;} #cross.on{transition:none;} }
+</style>
+</head>
+<body>
+
+
+<canvas id="c" tabindex="0" aria-label="Cảnh 3D Bến Nhà Rồng"></canvas>
+
+<div class="hud" id="brand">
+  <h1><small>Mô hình tham quan 3D</small>Bến Nhà Rồng</h1>
+  <div id="readout">
+    <span class="chip" id="xyz"><b>X</b><span id="vx">0.0</span>&nbsp;<b>Y</b><span id="vy">0.0</span>&nbsp;<b>Z</b><span id="vz">0.0</span></span>
+    <span class="chip" id="modeChip"><i></i><span id="modeTxt">Bay tự do XYZ</span></span>
+    <span class="chip" id="speedChip">Tốc độ <b id="speedTxt">1.0×</b></span>
+    <span class="chip" id="progress">Đã khám phá <b id="pCount">0</b>/<span id="pTotal">0</span></span>
+  </div>
+</div>
+
+<div class="hud" id="mapWrap">
+  <canvas id="minimap" width="336" height="336" aria-label="Sơ đồ mặt bằng"></canvas>
+  <span id="floorLbl">Sân trước</span>
+</div>
+
+<div class="hud" id="freeNote" hidden><span class="chip">Shift-lock đang bật · Shift hoặc Esc để tắt</span></div>
+<div class="hud" id="tip"><span class="chip" id="tipTxt"></span></div>
+<div class="hud" id="cross"></div>
+<div class="hud" id="aim"><span class="chip"><span id="aimName">Hiện vật</span>&nbsp;<kbd>Chuột trái</kbd></span></div>
+
+<div class="hud" id="bar">
+  <div id="hint"><kbd>W A S D</kbd> di chuyển · <kbd>]</kbd>/<kbd>[</kbd> lên/xuống · giữ <kbd>chuột trái</kbd> xoay · <kbd>Shift</kbd> Shift-lock · <kbd>lăn chuột</kbd> tốc độ · <kbd>G</kbd> đi bộ/bay</div>
+  <div id="tools">
+    <button class="tbtn" id="bShift" aria-pressed="false">Shift-lock (Shift)</button>
+    <button class="tbtn" id="bRoof" aria-pressed="false">Ẩn mái (R)</button>
+    <button class="tbtn" id="bXray" aria-pressed="false">Xuyên tường nhìn (X)</button>
+    <button class="tbtn" id="bNoclip" aria-pressed="false">Đi xuyên vật (N)</button>
+    <button class="tbtn" id="bWalk" aria-pressed="false">Chế độ đi bộ (G)</button>
+    <button class="tbtn" id="bMenu">Điểm đến &amp; hướng dẫn</button>
+  </div>
+</div>
+
+<div id="touch" hidden>
+  <div id="stick"><div id="knob"></div></div>
+  <div id="vbtns"><button id="tUp">Lên</button><button id="tDown">Xuống</button></div>
+</div>
+
+<aside id="info" aria-hidden="true" aria-labelledby="infoTitle">
+  <button id="xInfo" aria-label="Đóng">✕</button>
+  <div id="infoScroll">
+    <div id="infoTag"></div>
+    <div id="infoYear"></div>
+    <h2 id="infoTitle"></h2>
+    <div id="infoBody"></div>
+    <dl id="infoFacts"></dl>
+    <div id="infoNote"></div>
+    <div id="infoSrc"></div>
+  </div>
+  <div id="infoFoot"><button id="closeInfo">Tiếp tục tham quan <small>(Esc để đóng)</small></button></div>
+</aside>
+
+<div id="start">
+  <div class="card">
+    <h2><span>Số 1 Nguyễn Tất Thành · Thương cảng Sài Gòn · 1862</span>Bến Nhà Rồng</h2>
+    <p class="lead">Bay quanh và đi vào bên trong trụ sở hãng tàu cũ bên sông Sài Gòn. Giữ chuột trái và kéo để xoay góc nhìn. Bấm chuột trái vào hiện vật hoặc dấu hình thoi vàng là bảng lịch sử hiện ra ngay. Nhấn Shift để bật Shift-lock: góc nhìn đi theo chuột, bấm vào hiện vật ở tâm ngắm; khi bảng thông tin mở, chuột trở về trạng thái tự do.</p>
+    <div class="cols">
+      <div>
+        <h3>Di chuyển theo X · Y · Z</h3>
+        <dl class="keys">
+          <dt>W A S D / ←↑→↓</dt><dd>Tiến, lùi, sang trái, sang phải</dd>
+          <dt>]</dt><dd>Tăng độ cao (trục Y+) · hoặc Space, E</dd>
+          <dt>[</dt><dd>Giảm độ cao (trục Y−) · hoặc C, Q</dd>
+          <dt>Giữ chuột trái</dt><dd>Kéo để xoay góc nhìn</dd>
+          <dt>Con lăn chuột</dt><dd>Tăng / giảm tốc độ di chuyển</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Tương tác &amp; quan sát</h3>
+        <dl class="keys">
+          <dt>Chuột trái</dt><dd>Bấm vào hiện vật: hiện thông tin ngay</dd>
+          <dt>Shift</dt><dd>Bật / tắt Shift-lock (khóa chuột ở tâm)</dd>
+          <dt>Esc</dt><dd>Tắt Shift-lock / đóng bảng</dd>
+          <dt>G</dt><dd>Đổi bay tự do ↔ đi bộ có trọng lực</dd>
+          <dt>N</dt><dd>Đi xuyên tường, sàn</dd>
+          <dt>R · X</dt><dd>Ẩn mái · nhìn xuyên tường</dd>
+        </dl>
+      </div>
+    </div>
+    <div>
+      <div class="cols" style="margin-bottom:8px"><h3 style="margin:0">Dịch chuyển nhanh tới</h3></div>
+      <div id="tpList"></div>
+    </div>
+    <div>
+      <div class="cols" style="margin-bottom:8px"><h3 style="margin:0">Mở nhanh thông tin hiện vật</h3></div>
+      <div id="exList"></div>
+    </div>
+    <div class="go">
+      <button id="startBtn">Bắt đầu tham quan</button>
+      <span id="loadErr" hidden></span>
+    </div>
+    <p class="disclaim">Mô hình dựng lại theo ảnh chụp mặt tiền, ảnh flycam, ảnh phòng trưng bày và tư liệu công khai. Tỉ lệ, số nhịp cột và vị trí từng phòng là ước lượng; tượng đài, xe và hiện vật là hình khối phỏng dựng, ảnh trong khung chỉ là ô màu thay thế. Cảnh xung quanh (sông, bờ Thủ Thiêm, cảng, cao ốc) làm ở mức đơn giản. Nội dung lịch sử tóm lược từ bennharong.vn, trang tham quan 360° của bảo tàng, báo Nhân Dân, VTC, Znews, VinWonders và Wikipedia.</p>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+<script>
+if(!window.THREE){document.write('<script src="https://unpkg.com/three@0.149.0/build/three.min.js"><\/script>');}
+</script>
+<script>
+(async function(){
+"use strict";
+const $ = (id)=>document.getElementById(id);
+if(!window.THREE){
+  const e=$('loadErr'); e.hidden=false;
+  e.textContent='Không tải được thư viện 3D (three.js). Hãy kiểm tra kết nối mạng rồi tải lại trang.';
+  $('startBtn').disabled=true; return;
+}
+try{ await Promise.race([Promise.all(['700 40px Spectral','italic 500 40px Spectral','400 20px "Be Vietnam Pro"','600 20px "Be Vietnam Pro"','500 16px "JetBrains Mono"'].map(f=>document.fonts.load(f))), new Promise(r=>setTimeout(r,3500))]); }catch(e){}
+const T = THREE;
+const V3 = T.Vector3;
+
+/* ---------- renderer / scene ---------- */
+const canvas = $('c');
+const renderer = new T.WebGLRenderer({canvas, antialias:true, powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = T.PCFSoftShadowMap;
+renderer.outputEncoding = T.sRGBEncoding;
+renderer.toneMapping = T.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new T.Scene();
+scene.fog = new T.Fog(0xc9d6d4, 90, 520);
+const camera = new T.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 1500);
+camera.rotation.order = 'YXZ';
+
+/* sky dome */
+{
+  const g = new T.SphereGeometry(900, 32, 16);
+  const m = new T.ShaderMaterial({
+    side:T.BackSide, depthWrite:false, fog:false,
+    uniforms:{top:{value:new T.Color(0x6f9fc0)}, mid:{value:new T.Color(0xcfdedf)}, bot:{value:new T.Color(0xe9dcc0)}},
+    vertexShader:'varying vec3 vp; void main(){ vp=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+    fragmentShader:'uniform vec3 top; uniform vec3 mid; uniform vec3 bot; varying vec3 vp; void main(){ float h=vp.y; vec3 c = h>0.0 ? mix(mid, top, pow(clamp(h,0.0,1.0),0.6)) : mix(mid, bot, clamp(-h*4.0,0.0,1.0)); gl_FragColor=vec4(c,1.0); }'
+  });
+  scene.add(new T.Mesh(g, m));
+}
+
+/* lights */
+const hemi = new T.HemisphereLight(0xe3eef2, 0x6d5a3e, 0.62); scene.add(hemi);
+scene.add(new T.AmbientLight(0xfff4e0, 0.16));
+const sun = new T.DirectionalLight(0xfff0d2, 1.35);
+sun.position.set(48, 70, 36);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, {left:-62, right:62, top:62, bottom:-62, near:10, far:220});
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
+scene.add(sun); scene.add(sun.target);
+
+/* ---------- procedural textures ---------- */
+function cnv(w,h){ const c=document.createElement('canvas'); c.width=w; c.height=h; return [c, c.getContext('2d')]; }
+function tex(c, rep=true){ const t=new T.CanvasTexture(c); t.encoding=T.sRGBEncoding; if(rep){t.wrapS=t.wrapT=T.RepeatWrapping;} t.anisotropy=Math.min(8, renderer.capabilities.getMaxAnisotropy()); return t; }
+function noise(ctx,w,h,amt,alpha){ const id=ctx.getImageData(0,0,w,h), d=id.data; for(let i=0;i<d.length;i+=4){ const n=(Math.random()-.5)*amt; d[i]+=n; d[i+1]+=n; d[i+2]+=n; if(alpha) d[i+3]=255; } ctx.putImageData(id,0,0); }
+let rs = 7; const rnd = ()=>{ rs = (rs*16807)%2147483647; return (rs-1)/2147483646; };
+
+const TX = {};
+{ // salmon-pink exterior plaster (as in photos)
+  const [c,x]=cnv(256,256); x.fillStyle='#ec9f86'; x.fillRect(0,0,256,256);
+  for(let i=0;i<140;i++){ x.fillStyle=`rgba(${170+rnd()*50|0},${90+rnd()*30|0},${70+rnd()*20|0},${rnd()*.06})`; x.beginPath(); x.arc(rnd()*256,rnd()*256,4+rnd()*30,0,7); x.fill(); }
+  noise(x,256,256,14); TX.plaster=tex(c);
+}
+{ // interior: pale yellow plaster
+  const [c,x]=cnv(128,128); x.fillStyle='#f1e2b6'; x.fillRect(0,0,128,128); noise(x,128,128,10); TX.inner=tex(c);
+}
+{ // crazy-paving terrazzo floor (đá ghép) as in the gallery photo
+  const [c,x]=cnv(512,512); x.fillStyle='#d9d6cf'; x.fillRect(0,0,512,512);
+  const cols=['#5c6670','#7b8790','#9aa3a8','#c9cccc','#e4e2dc','#475059','#8d8a84','#b7b9b6','#6f7b86'];
+  for(let i=0;i<420;i++){ const cx=rnd()*512, cy=rnd()*512, r=8+rnd()*22, n=4+(rnd()*3|0), a0=rnd()*6.3;
+    x.fillStyle=cols[(rnd()*cols.length)|0]; x.beginPath();
+    for(let k=0;k<n;k++){ const a=a0+k/n*6.283+rnd()*0.5, rr=r*(0.6+rnd()*0.5); const px=cx+Math.cos(a)*rr, py=cy+Math.sin(a)*rr; k?x.lineTo(px,py):x.moveTo(px,py); }
+    x.closePath(); x.fill(); x.strokeStyle='rgba(235,232,225,.9)'; x.lineWidth=2.2; x.stroke(); }
+  noise(x,512,512,8); TX.terrazzo=tex(c);
+}
+{ // mahogany ceiling planks
+  const [c,x]=cnv(256,256); for(let i=0;i<16;i++){ const b=95+rnd()*25|0; x.fillStyle=`rgb(${b+25},${b*.42|0},${b*.28|0})`; x.fillRect(i*16,0,16,256); x.fillStyle='rgba(30,10,5,.45)'; x.fillRect(i*16,0,1.5,256); }
+  noise(x,256,256,8); TX.ceil=tex(c);
+}
+{ // white trim plaster
+  const [c,x]=cnv(128,128); x.fillStyle='#ece5d6'; x.fillRect(0,0,128,128); noise(x,128,128,12); TX.trim=tex(c);
+}
+{ // roof tiles (ngói)
+  const [c,x]=cnv(256,256); x.fillStyle='#8f4027'; x.fillRect(0,0,256,256);
+  for(let r=0;r<8;r++){ for(let k=0;k<8;k++){ const ox=k*32+(r%2?16:0), oy=r*32;
+    const g=x.createLinearGradient(0,oy,0,oy+32); const b=205+rnd()*35|0; g.addColorStop(0,`rgb(${b},${b*.5|0},${b*.3|0})`); g.addColorStop(1,`rgb(${b*.72|0},${b*.33|0},${b*.2|0})`);
+    x.fillStyle=g; x.beginPath(); x.moveTo(ox+1,oy); x.lineTo(ox+31,oy); x.lineTo(ox+31,oy+24); x.quadraticCurveTo(ox+16,oy+34,ox+1,oy+24); x.closePath(); x.fill();
+    if(ox+16>256){ x.save(); x.translate(-256,0); x.fill(); x.restore(); }
+  }}
+  noise(x,256,256,16); TX.tile=tex(c);
+}
+{ // encaustic cement tile floor (gạch bông)
+  const [c,x]=cnv(256,256);
+  for(let i=0;i<4;i++) for(let j=0;j<4;j++){ const ox=i*64, oy=j*64;
+    x.fillStyle='#e6dccb'; x.fillRect(ox,oy,64,64);
+    x.fillStyle='#9a3b2c'; x.beginPath(); x.moveTo(ox+32,oy+6); x.lineTo(ox+58,oy+32); x.lineTo(ox+32,oy+58); x.lineTo(ox+6,oy+32); x.closePath(); x.fill();
+    x.fillStyle='#e6dccb'; x.beginPath(); x.arc(ox+32,oy+32,13,0,7); x.fill();
+    x.fillStyle='#2f5d55'; x.beginPath(); x.arc(ox+32,oy+32,7,0,7); x.fill();
+    x.fillStyle='#2f5d55'; [[0,0],[64,0],[0,64],[64,64]].forEach(([a,b])=>{ x.beginPath(); x.arc(ox+a,oy+b,10,0,7); x.fill(); });
+    x.strokeStyle='rgba(60,40,30,.35)'; x.lineWidth=1; x.strokeRect(ox+.5,oy+.5,63,63);
+  }
+  noise(x,256,256,14); TX.floor=tex(c);
+}
+{ // wood planks
+  const [c,x]=cnv(256,256); for(let i=0;i<8;i++){ const b=110+rnd()*35|0; x.fillStyle=`rgb(${b},${b*.66|0},${b*.42|0})`; x.fillRect(0,i*32,256,32); x.fillStyle='rgba(0,0,0,.35)'; x.fillRect(0,i*32,256,1.5); x.fillRect((rnd()*256)|0,i*32,1.5,32);
+    for(let k=0;k<6;k++){ x.strokeStyle=`rgba(50,30,15,${.08+rnd()*.1})`; x.beginPath(); const yy=i*32+4+rnd()*24; x.moveTo(0,yy); x.bezierCurveTo(80,yy+rnd()*6-3,160,yy+rnd()*6-3,256,yy); x.stroke(); } }
+  noise(x,256,256,10); TX.wood=tex(c);
+}
+{ // courtyard stone
+  const [c,x]=cnv(256,256); x.fillStyle='#b7ad9c'; x.fillRect(0,0,256,256);
+  for(let r=0;r<8;r++) for(let k=0;k<4;k++){ const b=165+rnd()*30|0; x.fillStyle=`rgb(${b},${b-8},${b-22})`; x.fillRect(k*64+(r%2?32:0)+1, r*32+1, 62, 30); x.fillRect(k*64+(r%2?32:0)+1-256, r*32+1, 62, 30); }
+  noise(x,256,256,16); TX.stone=tex(c);
+}
+{ // grass
+  const [c,x]=cnv(256,256); x.fillStyle='#5f7c3e'; x.fillRect(0,0,256,256);
+  for(let i=0;i<2600;i++){ x.fillStyle=`rgba(${60+rnd()*60|0},${100+rnd()*60|0},${30+rnd()*30|0},.5)`; x.fillRect(rnd()*256,rnd()*256,1.5,3); }
+  TX.grass=tex(c);
+}
+
+/* ---------- materials ---------- */
+function std(o){ return new T.MeshStandardMaterial(Object.assign({roughness:.85, metalness:0}, o)); }
+function withScale(m, s){ m.userData.scale=s; return m; }
+const M = {
+  plaster: withScale(std({map:TX.plaster, color:0xffffff}), 3),
+  trim:    withScale(std({map:TX.trim}), 2),
+  tile:    std({map:TX.tile, side:T.DoubleSide, roughness:.7}),
+  floor:   withScale(std({map:TX.terrazzo, roughness:.35}), 3.2),
+  inner:   withScale(std({map:TX.inner}), 3),
+  ceilWood:withScale(std({map:TX.ceil, roughness:.5}), 2.5),
+  ridge:   std({color:0xd9d3c4, roughness:.7}),
+  salmon:  std({color:0xec9f86, roughness:.85}),
+  wood:    withScale(std({map:TX.wood, roughness:.7}), 2.5),
+  woodDark:withScale(std({map:TX.wood, color:0x7b5a43, roughness:.65}), 2.5),
+  stone:   withScale(std({map:TX.stone}), 4),
+  grass:   withScale(std({map:TX.grass}), 6),
+  ceiling: withScale(std({color:0xf1ece2}), 4),
+  shutter: std({color:0x3e6a52, roughness:.6}),
+  glassDark: std({color:0x1d2a2c, roughness:.15, metalness:.3}),
+  iron:    std({color:0x2b2b2a, roughness:.5, metalness:.6}),
+  glaze:   std({color:0x2f8c74, roughness:.28, metalness:.12, side:T.DoubleSide}),
+  glazeLt: std({color:0x5fbf9c, roughness:.3, metalness:.1}),
+  gold:    std({color:0xd6a644, roughness:.35, metalness:.75}),
+  white:   std({color:0xf3efe6, roughness:.6}),
+  red:     std({color:0x9b2f23, roughness:.6}),
+  black:   std({color:0x1b1c1d, roughness:.55}),
+  vitrine: new T.MeshPhysicalMaterial({color:0xdfeef0, roughness:.05, metalness:0, transmission:0, transparent:true, opacity:.18, depthWrite:false}),
+  paper:   std({color:0xe9dfc6, roughness:.9})
+};
+const WALL_MATS = [M.plaster, M.trim, M.inner, M.salmon];
+
+/* box with world-scaled UVs */
+function scaleBoxUV(geo,w,h,d,s){
+  const uv=geo.attributes.uv; const dims=[[d,h],[d,h],[w,d],[w,d],[w,h],[w,h]];
+  for(let f=0;f<6;f++) for(let k=0;k<4;k++){ const i=f*4+k; uv.setXY(i, uv.getX(i)*dims[f][0]/s, uv.getY(i)*dims[f][1]/s); }
+  uv.needsUpdate=true;
+}
+const colliders = [];   // {min:V3,max:V3}
+const occluders = [];   // meshes the aim ray stops at
+function addCollider(x0,y0,z0,x1,y1,z1){ colliders.push({min:new V3(Math.min(x0,x1),Math.min(y0,y1),Math.min(z0,z1)), max:new V3(Math.max(x0,x1),Math.max(y0,y1),Math.max(z0,z1))}); }
+function boxMM(x0,y0,z0,x1,y1,z1,mat,o={}){
+  const w=Math.abs(x1-x0), h=Math.abs(y1-y0), d=Math.abs(z1-z0);
+  if(w<1e-4||h<1e-4||d<1e-4) return null;
+  const geo=new T.BoxGeometry(w,h,d);
+  const s = (Array.isArray(mat)? (mat[2].userData.scale||mat[0].userData.scale) : mat.userData.scale);
+  if(s) scaleBoxUV(geo,w,h,d,s);
+  const m=new T.Mesh(geo,mat);
+  m.position.set((x0+x1)/2,(y0+y1)/2,(z0+z1)/2);
+  m.castShadow = o.cast!==false; m.receiveShadow = true;
+  (o.parent||scene).add(m);
+  if(o.collide!==false) addCollider(x0,y0,z0,x1,y1,z1);
+  if(o.occlude!==false) occluders.push(m);
+  return m;
+}
+function cyl(r0,r1,h,mat,x,y,z,o={}){
+  const m=new T.Mesh(new T.CylinderGeometry(r0,r1,h,o.seg||14),mat); m.position.set(x,y,z); m.castShadow=o.cast!==false; m.receiveShadow=true; (o.parent||scene).add(m);
+  if(o.collide) addCollider(x-r1,y-h/2,z-r1,x+r1,y+h/2,z+r1);
+  if(o.occlude) occluders.push(m);
+  return m;
+}
+
+/* ---------- canvas text helpers ---------- */
+function wrapLines(ctx, text, maxW){
+  const words=text.split(' '); const out=[]; let line='';
+  for(const w of words){ const t=line?line+' '+w:w; if(ctx.measureText(t).width>maxW && line){ out.push(line); line=w; } else line=t; }
+  if(line) out.push(line); return out;
+}
+
+/* ================= BUILDING (rebuilt from reference photos) =================
+   Core block x ±20, z -7..7, two storeys; a 3 m arcade/veranda wraps all four sides
+   (outer columns at x ±23, z ±10). Salmon-pink plaster, white trim, hipped orange-tile roof,
+   white balustrade parapets at the roof edge, dragons + emblem + flags on the ridge. */
+const G0=0.6, F2=5.9, SL0=5.6, EAVE=10.6, TW=0.4, PITCH=0.42, OX=23, OZ=10;
+{ // louvred shutter texture
+  const [c,x]=cnv(64,128); x.fillStyle='#3d6a51'; x.fillRect(0,0,64,128);
+  x.fillStyle='#2c4f3c'; for(let y=8;y<120;y+=7){ x.fillRect(6,y,52,3); }
+  x.strokeStyle='#2a4636'; x.lineWidth=4; x.strokeRect(2,2,60,124);
+  M.shutter.map=tex(c,false); M.shutter.color.set(0xffffff); M.shutter.needsUpdate=true;
+}
+const fanGeoCache={}, torusCache={};
+function archDeco(axis, c, mid, top, r, out, both, mat){
+  const key=r.toFixed(2);
+  const fg = fanGeoCache[key] || (fanGeoCache[key]=new T.CircleGeometry(r*0.92, 20, 0, Math.PI));
+  const tg = torusCache[key] || (torusCache[key]=new T.TorusGeometry(r, 0.07, 6, 22, Math.PI));
+  const sides = both? [1,-1] : [out];
+  for(const s of sides){
+    const off = c + s*(TW/2+0.012);
+    const fan=new T.Mesh(fg, M.glassDark), tor=new T.Mesh(tg, mat||M.trim);
+    for(const m of [fan,tor]){
+      if(axis==='x'){ m.position.set(mid, top, off); if(s<0) m.rotation.y=Math.PI; }
+      else { m.position.set(off, top, mid); m.rotation.y = s>0? Math.PI/2 : -Math.PI/2; }
+      scene.add(m);
+    }
+    tor.position[axis==='x'?'z':'x'] += s*0.03;
+  }
+}
+function shutters(axis, c, a, b, lo, hi, out){
+  const w=(b-a)/2, off=c+out*(TW/2+0.035);
+  for(const [p0,p1] of [[a-w-0.05,a-0.05],[b+0.05,b+w+0.05]]){
+    if(axis==='x') boxMM(p0,lo,off-0.025,p1,hi,off+0.025,M.shutter,{collide:false,occlude:false});
+    else boxMM(off-0.025,lo,p0,off+0.025,hi,p1,M.shutter,{collide:false,occlude:false});
+  }
+}
+/* exterior face salmon, interior faces pale yellow */
+function wallMats(axis,out,both){
+  if(both) return M.inner;
+  const m=[M.inner,M.inner,M.inner,M.inner,M.inner,M.inner];
+  m[axis==='x' ? (out>0?4:5) : (out>0?0:1)] = M.plaster; return m;
+}
+function wall(axis, c, a0, a1, y0, y1, ops, o={}){
+  const out=o.out||1, mat=o.mat||wallMats(axis,out,o.both);
+  const B=(a,b,ya,yb)=> axis==='x' ? boxMM(a,ya,c-TW/2,b,yb,c+TW/2,mat) : boxMM(c-TW/2,ya,a,c+TW/2,yb,b,mat);
+  ops=(ops||[]).map(p=>Object.assign({},p,{a:p.m-p.w/2,b:p.m+p.w/2})).sort((p,q)=>p.a-q.a);
+  let cur=a0;
+  for(const p of ops){
+    B(cur,p.a,y0,y1);
+    if(p.lo>y0+1e-3) B(p.a,p.b,y0,p.lo);
+    if(p.hi<y1-1e-3) B(p.a,p.b,p.hi,y1);
+    if(p.arch!==false && p.hi + p.w/2 < y1) archDeco(axis,c,p.m,p.hi,p.w/2,out,!!o.both);
+    if(p.sh) shutters(axis,c,p.a,p.b,p.lo,p.hi,out);
+    if(p.lo>y0+0.3){ const s=out*(TW/2+0.06); if(axis==='x') boxMM(p.a-0.08,p.lo-0.1,c+s-0.06,p.b+0.08,p.lo,c+s+0.06,M.trim,{collide:false,occlude:false}); else boxMM(c+s-0.06,p.lo-0.1,p.a-0.08,c+s+0.06,p.lo,p.b+0.08,M.trim,{collide:false,occlude:false}); }
+    cur=p.b;
+  }
+  B(cur,a1,y0,y1);
+}
+const win =(m,lo,hi,w=1.4)=>({m,w,lo,hi,sh:true});
+const door=(m,lo,hi,w=1.8,sh=false)=>({m,w,lo,hi,sh});
+
+/* plinth, floors, steps */
+boxMM(-OX-0.6,0,-OZ-0.6,OX+0.6,0.55,OZ+0.6,M.stone);
+boxMM(-OX-0.3,0.55,-OZ-0.3,OX+0.3,G0,OZ+0.3,M.floor);
+for(const zs of [1,-1]){
+  boxMM(-3.4,0,zs>0?OZ+0.6:-OZ-2.0,3.4,0.2,zs>0?OZ+2.0:-OZ-0.6,M.stone);
+  boxMM(-3.4,0,zs>0?OZ+0.6:-OZ-1.3,3.4,0.4,zs>0?OZ+1.3:-OZ-0.6,M.stone);
+}
+
+/* core walls, two storeys */
+for(const [y0,y1,up] of [[G0,F2,false],[F2,EAVE,true]]){
+  const wl=up?F2+0.9:1.7, wh=up?9.0:4.1, dl=up?F2:G0, dh=up?8.7:3.7;
+  wall('x',-7,-20.2,20.2,y0,y1,(up?[-17.5,-14,-10.5,-3,3,10.5,14,17.5].map(m=>win(m,wl,wh)):[win(-17.5,wl,wh),win(-14,wl,wh),win(-10.5,wl,wh),door(-8.2,dl,dh,1.6,true),door(8.2,dl,dh,1.6,true),win(10.5,wl,wh),win(14,wl,wh),win(17.5,wl,wh)]),{out:-1});
+  for(const s of [-1,1]) wall('z',20*s,-7.2,7.2,y0,y1,[-4,0,4].map(m=>win(m,wl,wh)),{out:s});
+  wall('x',7,-20.2,20.2,y0,y1,[-16.5,-13,-9.5,-3.6,0,3.6,9.5,13,16.5].map(m=> m===0? door(0,dl,up?8.6:4.0,up?1.8:2.4,up) : (Math.abs(m)===13? door(m,dl,dh,1.8,true) : win(m,wl,wh))),{out:1});
+  for(const s of [-1,1]) wall('z',6*s,-6.8,6.8,y0,y1,[door(2.2,dl,up?8.4:3.6,1.6)],{out:s,both:true});
+}
+
+/* slab between floors (hole for stair); top = terrazzo, underside = mahogany ceiling */
+const slabMat=[M.trim,M.trim,M.floor,M.ceilWood,M.trim,M.trim];
+boxMM(-OX-0.3,SL0,-5.1,OX+0.3,F2,OZ+0.3,slabMat);
+boxMM(-OX-0.3,SL0,-OZ-0.3,-5.5,F2,-5.1,slabMat);
+boxMM(5.0,SL0,-OZ-0.3,OX+0.3,F2,-5.1,slabMat);
+boxMM(-5.5,SL0,-OZ-0.3,5.0,F2,-7.2,slabMat);
+
+/* stair along back wall of the hall: x -5 → 5 */
+{
+  const n=20, run=0.5, rise=(F2-G0)/n;
+  for(let i=0;i<n;i++) boxMM(-5+i*run,G0,-6.8,-5+(i+1)*run,G0+(i+1)*rise,-5.2,M.woodDark);
+  const len=Math.hypot(10,F2-G0);
+  const rail=new T.Mesh(new T.BoxGeometry(len,0.08,0.08),M.woodDark);
+  rail.position.set(0,(G0+F2)/2+0.95,-5.22); rail.rotation.z=Math.atan2(F2-G0,10); scene.add(rail);
+  for(let i=0;i<n;i+=2) cyl(0.025,0.025,0.95,M.iron,-5+i*run+run/2,G0+(i+1)*rise+0.47,-5.22,{seg:6});
+  boxMM(-5.5,F2,-5.12,4.4,F2+1.0,-5.02,M.woodDark,{occlude:false});
+  boxMM(-5.6,F2,-6.8,-5.5,F2+1.0,-5.02,M.woodDark,{occlude:false});
+}
+
+/* ---------- balusters (instanced) ---------- */
+const balGeo=new T.LatheGeometry([[0.0,0],[0.075,0],[0.075,0.07],[0.05,0.12],[0.095,0.34],[0.045,0.58],[0.065,0.66],[0.065,0.72],[0,0.72]].map(p=>new T.Vector2(p[0],p[1])),10);
+const balMats=[]; const _m4=new T.Matrix4(), _q=new T.Quaternion(), _s=new V3(1,1,1);
+function balRun(ax,az,bx,bz,y,h){ // balusters + rail from a to b at height y
+  const L=Math.hypot(bx-ax,bz-az), n=Math.max(1,Math.floor(L/0.3));
+  for(let i=0;i<n;i++){ const t=(i+0.5)/n; _m4.compose(new V3(ax+(bx-ax)*t,y+0.06,az+(bz-az)*t),_q,new V3(1,(h-0.2)/0.72,1)); balMats.push(_m4.clone()); }
+  const alongX=Math.abs(bx-ax)>Math.abs(bz-az);
+  const x0=Math.min(ax,bx), x1=Math.max(ax,bx), z0=Math.min(az,bz), z1=Math.max(az,bz);
+  if(alongX){ boxMM(x0,y+h-0.14,az-0.13,x1,y+h,az+0.13,M.trim,{collide:false}); boxMM(x0,y,az-0.12,x1,y+0.07,az+0.12,M.trim,{collide:false,occlude:false}); addCollider(x0,y,az-0.12,x1,y+h,az+0.12); }
+  else { boxMM(ax-0.13,y+h-0.14,z0,ax+0.13,y+h,z1,M.trim,{collide:false}); boxMM(ax-0.12,y,z0,ax+0.12,y+0.07,z1,M.trim,{collide:false,occlude:false}); addCollider(ax-0.12,y,z0,ax+0.12,y+h,z1); }
+}
+
+/* ---------- outer arcade (all four sides) ---------- */
+const FRONT_X=[...Array(12)].map((_,i)=>-OX+i*(2*OX/11));
+const SIDE_Z=[...Array(6)].map((_,j)=>-OZ+j*(2*OZ/5));
+const SPRING=G0+2.45;
+const colKey=new Set(), COLS=[];
+const addCol=(x,z)=>{ const k=x.toFixed(2)+','+z.toFixed(2); if(colKey.has(k)) return; colKey.add(k); COLS.push([x,z]); };
+for(const x of FRONT_X){ addCol(x,OZ); addCol(x,-OZ); }
+for(const z of SIDE_Z){ addCol(-OX,z); addCol(OX,z); }
+for(const [x,z] of COLS){
+  for(const [y0,y1] of [[G0,F2],[F2,EAVE]]){
+    boxMM(x-0.32,y0,z-0.32,x+0.32,y1,z+0.32,M.plaster);
+    boxMM(x-0.4,y0,z-0.4,x+0.4,y0+0.32,z+0.4,M.trim,{collide:false,occlude:false});
+    boxMM(x-0.4,y1-0.42,z-0.4,x+0.4,y1-0.28,z+0.4,M.trim,{collide:false,occlude:false});
+  }
+}
+const archTorus={};
+function arcade(ax,az,bx,bz){ // one bay between two columns
+  const L=Math.hypot(bx-ax,bz-az)-0.64, r=L/2, H=F2-SPRING;
+  const sh=new T.Shape(); sh.moveTo(-r,0); sh.lineTo(-r,H); sh.lineTo(r,H); sh.lineTo(r,0); sh.absarc(0,0,r,0,Math.PI,false);
+  const geo=new T.ExtrudeGeometry(sh,{depth:0.5,bevelEnabled:false,curveSegments:20});
+  const m=new T.Mesh(geo,M.salmon); m.castShadow=true; m.receiveShadow=true;
+  const mx=(ax+bx)/2, mz=(az+bz)/2, alongX=Math.abs(bx-ax)>Math.abs(bz-az);
+  if(alongX) m.position.set(mx,SPRING,mz-0.25); else { m.rotation.y=-Math.PI/2; m.position.set(mx+0.25,SPRING,mz); }
+  scene.add(m); occluders.push(m);
+  const tg=archTorus[r.toFixed(2)]||(archTorus[r.toFixed(2)]=new T.TorusGeometry(r+0.02,0.09,6,24,Math.PI));
+  for(const s of [-1,1]){ const t=new T.Mesh(tg,M.trim); if(alongX){ t.position.set(mx,SPRING,mz+s*0.27); } else { t.rotation.y=Math.PI/2; t.position.set(mx+s*0.27,SPRING,mz); } scene.add(t);
+    const k=new T.Mesh(new T.BoxGeometry(0.28,0.42,0.1),M.trim); if(alongX) k.position.set(mx,SPRING+r+0.12,mz+s*0.28); else { k.rotation.y=Math.PI/2; k.position.set(mx+s*0.28,SPRING+r+0.12,mz); } scene.add(k); }
+  // upper storey: frieze beam + balustrade between the columns
+  const x0=Math.min(ax,bx)+(alongX?0.32:0), x1=Math.max(ax,bx)-(alongX?0.32:0), z0=Math.min(az,bz)+(alongX?0:0.32), z1=Math.max(az,bz)-(alongX?0:0.32);
+  if(alongX) boxMM(x0,EAVE-1.0,az-0.25,x1,EAVE-0.3,az+0.25,M.salmon,{collide:false}); else boxMM(ax-0.25,EAVE-1.0,z0,ax+0.25,EAVE-0.3,z1,M.salmon,{collide:false});
+  if(alongX) balRun(x0,az,x1,az,F2,1.0); else balRun(ax,z0,ax,z1,F2,1.0);
+}
+for(let i=0;i<FRONT_X.length-1;i++){ arcade(FRONT_X[i],OZ,FRONT_X[i+1],OZ); arcade(FRONT_X[i],-OZ,FRONT_X[i+1],-OZ); }
+for(let j=0;j<SIDE_Z.length-1;j++){ arcade(-OX,SIDE_Z[j],-OX,SIDE_Z[j+1]); arcade(OX,SIDE_Z[j],OX,SIDE_Z[j+1]); }
+
+/* belt course at the floor line + heavy cornice at the eave (rings) */
+function ring(y0,y1,inset,out){ const a=OX+out, b=OZ+out, ia=OX-inset, ib=OZ-inset;
+  boxMM(-a,y0,ib,a,y1,b,M.trim,{collide:false,occlude:false}); boxMM(-a,y0,-b,a,y1,-ib,M.trim,{collide:false,occlude:false});
+  boxMM(-a,y0,-ib,-ia,y1,ib,M.trim,{collide:false,occlude:false}); boxMM(ia,y0,-ib,a,y1,ib,M.trim,{collide:false,occlude:false}); }
+ring(F2-0.12,F2+0.18,0.42,0.42);
+ring(EAVE-0.3,EAVE+0.05,0.5,0.62);
+
+/* roof-edge parapet with balusters (front centre left open, as in the photo) */
+{
+  const y=EAVE+0.05, ex=OX+0.25, ez=OZ+0.25;
+  const posts=[];
+  const post=(x,z)=>{ boxMM(x-0.3,y,z-0.3,x+0.3,y+1.05,z+0.3,M.trim,{collide:false}); boxMM(x-0.36,y+1.05,z-0.36,x+0.36,y+1.18,z+0.36,M.trim,{collide:false,occlude:false}); };
+  const fx=FRONT_X.filter(x=>Math.abs(x)>9.5);
+  // front (two end runs) and back
+  for(const s of [-1,1]){ const xs=fx.filter(x=>x*s>0).sort((p,q)=>p-q);
+    xs.forEach(x=>post(x,ez)); for(let i=0;i<xs.length-1;i++) balRun(xs[i]+0.3,ez,xs[i+1]-0.3,ez,y,0.95); }
+  for(const s of [-1,1]){ const xs=fx.filter(x=>x*s>0).sort((p,q)=>p-q); xs.forEach(x=>post(x,-ez)); for(let i=0;i<xs.length-1;i++) balRun(xs[i]+0.3,-ez,xs[i+1]-0.3,-ez,y,0.95); }
+  for(const s of [-1,1]){ SIDE_Z.forEach(z=>post(s*ex,z)); for(let j=0;j<SIDE_Z.length-1;j++) balRun(s*ex,SIDE_Z[j]+0.3,s*ex,SIDE_Z[j+1]-0.3,y,0.95); }
+}
+
+/* ---------- roofs ---------- */
+function hipRoof(x0,x1,z0,z1,y,pitch){
+  const alongX = (x1-x0) >= (z1-z0);
+  const hd = alongX ? (z1-z0)/2 : (x1-x0)/2, h = hd*pitch, top=y+h;
+  let P;
+  if(alongX){ const zc=(z0+z1)/2; const R1=[x0+hd,top,zc], R2=[x1-hd,top,zc];
+    P=[ [[x0,y,z1],[x1,y,z1],R2,R1, 'x'], [[x1,y,z0],[x0,y,z0],R1,R2,'x'], [[x0,y,z0],[x0,y,z1],R1,null,'z'], [[x1,y,z1],[x1,y,z0],R2,null,'z'] ];
+  } else { const xc=(x0+x1)/2; const R1=[xc,top,z0+hd], R2=[xc,top,z1-hd];
+    P=[ [[x1,y,z1],[x1,y,z0],R1,R2,'z'], [[x0,y,z0],[x0,y,z1],R2,R1,'z'], [[x1,y,z0],[x0,y,z0],R1,null,'x'], [[x0,y,z1],[x1,y,z1],R2,null,'x'] ];
+  }
+  const pos=[], uv=[];
+  const push=(p,ax)=>{ pos.push(...p); uv.push((ax==='x'?p[0]:p[2])/2.2, (p[1]-y)/(pitch*1.1)); };
+  for(const f of P){ const [a,b,c,d,ax]=f;
+    if(d){ push(a,ax);push(b,ax);push(c,ax); push(a,ax);push(c,ax);push(d,ax); }
+    else { push(a,ax);push(b,ax);push(c,ax); }
+  }
+  const g=new T.BufferGeometry(); g.setAttribute('position',new T.Float32BufferAttribute(pos,3)); g.setAttribute('uv',new T.Float32BufferAttribute(uv,2)); g.computeVertexNormals();
+  const m=new T.Mesh(g,M.tile); m.castShadow=true; m.receiveShadow=true;
+  return {mesh:m, top, hd, alongX, x0,x1,z0,z1,y};
+}
+const roofGroup=new T.Group(); scene.add(roofGroup);
+const mainRoof=hipRoof(-OX-0.2,OX+0.2,-OZ-0.2,OZ+0.2,EAVE+0.05,PITCH); roofGroup.add(mainRoof.mesh); occluders.push(mainRoof.mesh);
+const pavRoof=hipRoof(-5,5,-1.4,OZ+0.8,EAVE+0.05,PITCH); roofGroup.add(pavRoof.mesh); occluders.push(pavRoof.mesh);
+const RIDGE_Y=mainRoof.top, ZC=0;
+const ridgeHalf=OX+0.2-mainRoof.hd;
+function ridgeLine(p,q,r){ const L=p.distanceTo(q); const m=new T.Mesh(new T.CylinderGeometry(r,r,L,8),M.ridge); m.position.copy(p).add(q).multiplyScalar(.5); m.quaternion.setFromUnitVectors(new V3(0,1,0),q.clone().sub(p).normalize()); m.castShadow=true; roofGroup.add(m); return m; }
+{ // main ridge: raised decorative crest with curled ends; hip ridges to the corners
+  const crest=new T.Mesh(new T.BoxGeometry(ridgeHalf*2,0.42,0.34),M.ridge); crest.position.set(0,RIDGE_Y+0.2,ZC); crest.castShadow=true; roofGroup.add(crest);
+  const cap=new T.Mesh(new T.BoxGeometry(ridgeHalf*2+0.2,0.1,0.46),M.ridge); cap.position.set(0,RIDGE_Y+0.45,ZC); roofGroup.add(cap);
+  for(const s of [-1,1]){
+    const curl=new T.Mesh(new T.TorusGeometry(0.42,0.13,8,18,Math.PI*1.35),M.ridge); curl.position.set(s*(ridgeHalf+0.05),RIDGE_Y+0.82,ZC); curl.rotation.z = s>0 ? -0.9 : Math.PI+0.9-Math.PI*0.35; if(s<0) curl.scale.x=-1; curl.castShadow=true; roofGroup.add(curl);
+    for(const zs of [-1,1]) ridgeLine(new V3(s*ridgeHalf,RIDGE_Y+0.05,ZC), new V3(s*(OX+0.2),EAVE+0.12,zs*(OZ+0.2)),0.11);
+  }
+  // little gablet ridge
+  ridgeLine(new V3(0,pavRoof.top+0.04,OZ+0.8-5),new V3(0,pavRoof.top+0.04,-1.4+5),0.1);
+}
+{ // front pediment (gablet) facing the courtyard
+  const sh=new T.Shape(); sh.moveTo(-4.9,0); sh.lineTo(4.9,0); sh.lineTo(0,2.06); sh.closePath();
+  const m=new T.Mesh(new T.ExtrudeGeometry(sh,{depth:0.35,bevelEnabled:false}),M.salmon); m.position.set(0,EAVE+0.05,OZ+0.45); m.castShadow=true; roofGroup.add(m);
+  const t=new T.Mesh(new T.ExtrudeGeometry((()=>{const s=new T.Shape(); s.moveTo(-5.3,0); s.lineTo(5.3,0); s.lineTo(0,2.3); s.closePath(); const h=new T.Path(); h.moveTo(-4.6,0.16); h.lineTo(4.6,0.16); h.lineTo(0,2.0); h.closePath(); s.holes.push(h); return s;})(),{depth:0.25,bevelEnabled:false}),M.trim);
+  t.position.set(0,EAVE+0.0,OZ+0.7); roofGroup.add(t);
+  const disc=new T.Mesh(new T.CircleGeometry(0.42,24),M.trim); disc.position.set(0,EAVE+0.85,OZ+0.81); roofGroup.add(disc);
+}
+/* upstairs room ceilings (hidden together with the roof by "Ẩn mái") */
+{
+  const g=new T.BoxGeometry(39.6,0.1,13.6); scaleBoxUV(g,39.6,0.1,13.6,2.5);
+  const c=new T.Mesh(g,[M.trim,M.trim,M.trim,M.ceilWood,M.trim,M.trim]); c.position.set(0,EAVE-0.2,0); c.receiveShadow=true; roofGroup.add(c); occluders.push(c);
+}
+/* ceiling track spotlights (instanced) */
+const spotMats=[];
+for(const y of [SL0-0.04, EAVE-0.27]) for(const z of [-3.6,3.0]) for(let x=-19;x<=19;x+=1.6){ if(Math.abs(x)<0.5) continue; _m4.compose(new V3(x,y-0.1,z),new T.Quaternion().setFromEuler(new T.Euler(0.5*(z<0?1:-1),0,0)),_s); spotMats.push([_m4.clone(), y>8]); }
+{
+  const sg=new T.CylinderGeometry(0.06,0.08,0.2,8);
+  const lo=spotMats.filter(s=>!s[1]), hi=spotMats.filter(s=>s[1]);
+  const mk=(arr,parent)=>{ const im=new T.InstancedMesh(sg,M.black,arr.length); arr.forEach((s,i)=>im.setMatrixAt(i,s[0])); parent.add(im); };
+  mk(lo,scene); mk(hi,roofGroup);
+  for(const y of [SL0-0.03]) for(const z of [-3.6,3.0]) boxMM(-19.5,y-0.04,z-0.03,19.5,y,z+0.03,M.black,{collide:false,occlude:false,cast:false});
+  for(const z of [-3.6,3.0]){ const r=new T.Mesh(new T.BoxGeometry(39,0.04,0.06),M.black); r.position.set(0,EAVE-0.27,z); roofGroup.add(r); }
+}
+
+/* timber trusses under the main roof */
+const trussGroup=new T.Group(); scene.add(trussGroup);
+function beamBetween(p,q,th,mat,parent){
+  const L=p.distanceTo(q); const m=new T.Mesh(new T.BoxGeometry(th,th,L),mat||M.woodDark);
+  m.position.copy(p).add(q).multiplyScalar(0.5); m.lookAt(q); m.castShadow=true; m.receiveShadow=true; (parent||trussGroup).add(m); return m;
+}
+{
+  for(let x=-20;x<=20;x+=4){
+    const room=Math.min(mainRoof.hd, OX+0.2-Math.abs(x)-0.6);
+    const top=EAVE+0.05+room*PITCH-0.25;
+    beamBetween(new V3(x,EAVE+0.18,-OZ+0.1),new V3(x,EAVE+0.18,OZ-0.1),0.24);
+    beamBetween(new V3(x,EAVE+0.3,ZC),new V3(x,top,ZC),0.2);
+    for(const za of [-OZ+0.1,OZ-0.1]){
+      const p=new V3(x,EAVE+0.25,za), q=new V3(x,top,ZC);
+      beamBetween(p,q,0.2);
+      beamBetween(new V3(x,EAVE+0.45,ZC+(za<ZC?-0.1:0.1)),p.clone().lerp(q,0.5),0.13);
+    }
+  }
+  beamBetween(new V3(-ridgeHalf+0.3,RIDGE_Y-0.32,ZC),new V3(ridgeHalf-0.3,RIDGE_Y-0.32,ZC),0.22);
+  for(const s of [-1,1]) for(const f of [0.35,0.7]){
+    const y=EAVE+0.05+mainRoof.hd*f*PITCH-0.3, z=ZC-s*mainRoof.hd*(1-f), half=OX+0.2-mainRoof.hd*f-0.8;
+    beamBetween(new V3(-half,y,z),new V3(half,y,z),0.16);
+  }
+}
+
+/* flags on the ridge (national flag + party flag) */
+const flags=[];
+function flagTex(kind){ const [c,x]=cnv(300,200); x.fillStyle='#da251d'; x.fillRect(0,0,300,200); x.fillStyle='#ffde00';
+  if(kind==='vn'){ x.beginPath(); for(let i=0;i<10;i++){ const r=i%2?24:62, a=-Math.PI/2+i*Math.PI/5; x.lineTo(150+Math.cos(a)*r,100+Math.sin(a)*r); } x.closePath(); x.fill(); }
+  else { x.save(); x.translate(110,100); x.lineWidth=12; x.strokeStyle='#ffde00'; x.beginPath(); x.arc(0,0,42,Math.PI*0.25,Math.PI*1.45); x.stroke(); x.rotate(-0.8); x.fillRect(-6,-48,12,82); x.fillRect(-26,-56,52,18); x.restore(); }
+  return tex(c,false); }
+for(const [k,dx] of [['vn',-0.75],['party',0.75]]){
+  const pole=new T.Mesh(new T.CylinderGeometry(0.04,0.05,5.2,8),M.white); pole.position.set(dx,RIDGE_Y+0.5+2.6,ZC-1.3); roofGroup.add(pole);
+  const g=new T.PlaneGeometry(2.1,1.4,14,1); g.translate(1.05,0,0);
+  const f=new T.Mesh(g,std({map:flagTex(k),side:T.DoubleSide,roughness:.8})); f.position.set(dx+0.04,RIDGE_Y+0.5+4.45,ZC-1.3); if(dx<0) f.rotation.y=Math.PI; roofGroup.add(f);
+  f.userData.base=Float32Array.from(g.attributes.position.array); flags.push(f);
+}
+function updateFlags(t){ for(const f of flags){ const p=f.geometry.attributes.position, b=f.userData.base; for(let i=0;i<p.count;i++){ const x=b[i*3]; p.setZ(i,Math.sin(x*2.2-t*4)*0.16*(x/2.1)); } p.needsUpdate=true; } }
+
+/* red banner on the upstairs balustrade of the river-facing (main) facade */
+{
+  const m=new T.Mesh(new T.PlaneGeometry(12.2,0.82),std({map:drawPanel({w:12.2,h:0.82,title:'BẢO TÀNG HỒ CHÍ MINH – CHI NHÁNH THÀNH PHỐ HỒ CHÍ MINH',titleSize:30,bg:'#c8231b',bg2:'#b51f17',ink:'#ffdf5a',ink2:'#c8231b'}),roughness:.85,side:T.DoubleSide}));
+  m.position.set(0,F2+0.55,-OZ-0.16); m.rotation.y=Math.PI; scene.add(m);
+}
+/* ---------- Lưỡng long chầu nguyệt (two dragons + emblem) ---------- */
+function makeDragon(){
+  const g=new T.Group();
+  const pts=[[-6.2,0.9,0],[-5.7,1.5,0.15],[-5.0,0.95,0],[-4.3,0.3,-0.1],[-3.5,0.55,0],[-2.8,1.35,0.1],[-2.1,1.55,0],[-1.6,1.15,0],[-1.25,1.25,0]].map(p=>new V3(...p));
+  const curve=new T.CatmullRomCurve3(pts);
+  const TS=90, RS=10;
+  const geo=new T.TubeGeometry(curve,TS,0.26,RS,false);
+  const pa=geo.attributes.position, v=new V3();
+  for(let i=0;i<=TS;i++){ const t=i/TS; const c=curve.getPointAt(t); const k = 0.25+0.85*Math.sin(Math.min(1,t*1.15)*Math.PI*0.62);
+    for(let j=0;j<=RS;j++){ const idx=i*(RS+1)+j; v.fromBufferAttribute(pa,idx).sub(c).multiplyScalar(k).add(c); pa.setXYZ(idx,v.x,v.y,v.z); } }
+  geo.computeVertexNormals();
+  g.add(new T.Mesh(geo,M.glaze));
+  // dorsal fins
+  const fin=new T.ConeGeometry(0.09,0.34,5);
+  for(let t=0.08;t<0.92;t+=0.045){ const p=curve.getPointAt(t), tg=curve.getTangentAt(t); const k=0.25+0.85*Math.sin(Math.min(1,t*1.15)*Math.PI*0.62);
+    const f=new T.Mesh(fin,M.glazeLt); f.position.copy(p).add(new V3(0,0.24*k+0.1,0)); f.rotation.z=-Math.atan2(tg.y,tg.x)*0.5-0.35; g.add(f); }
+  // head
+  const head=new T.Group(); head.position.set(-1.05,1.3,0);
+  const skull=new T.Mesh(new T.SphereGeometry(0.34,14,10),M.glaze); skull.scale.set(1.25,0.85,0.9); head.add(skull);
+  const snout=new T.Mesh(new T.CylinderGeometry(0.17,0.26,0.55,10),M.glaze); snout.rotation.z=-Math.PI/2; snout.position.set(0.38,-0.05,0); head.add(snout);
+  const jaw=new T.Mesh(new T.ConeGeometry(0.16,0.5,8),M.glaze); jaw.rotation.z=-Math.PI/2-0.45; jaw.position.set(0.32,-0.24,0); head.add(jaw);
+  for(const s of [-1,1]){
+    const horn=new T.Mesh(new T.ConeGeometry(0.06,0.6,6),M.glazeLt); horn.position.set(-0.18,0.35,0.13*s); horn.rotation.set(0.25*s,0,0.95); head.add(horn);
+    const eye=new T.Mesh(new T.SphereGeometry(0.07,8,6),M.gold); eye.position.set(0.12,0.12,0.24*s); head.add(eye);
+    const wc=new T.CatmullRomCurve3([new V3(0.55,-0.02,0.12*s),new V3(0.75,0.1,0.35*s),new V3(0.62,0.35,0.55*s),new V3(0.35,0.45,0.6*s)]);
+    head.add(new T.Mesh(new T.TubeGeometry(wc,12,0.022,5,false),M.glazeLt));
+  }
+  const mane=new T.Mesh(new T.ConeGeometry(0.22,0.6,6),M.glazeLt); mane.position.set(-0.4,0.12,0); mane.rotation.z=1.9; head.add(mane);
+  g.add(head);
+  // legs (simple)
+  for(const [t,s] of [[0.3,1],[0.3,-1],[0.62,1],[0.62,-1]]){ const p=curve.getPointAt(t); const l=new T.Mesh(new T.CylinderGeometry(0.05,0.08,0.55,6),M.glaze); l.position.set(p.x,p.y-0.25,p.z+0.18*s); l.rotation.x=0.35*s; g.add(l);
+    const claw=new T.Mesh(new T.SphereGeometry(0.09,6,5),M.glazeLt); claw.position.set(p.x,p.y-0.52,p.z+0.27*s); g.add(claw); }
+  g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; } });
+  return g;
+}
+const dragonGroup=new T.Group(); dragonGroup.position.set(0,RIDGE_Y+0.5,ZC); roofGroup.add(dragonGroup);
+{
+  const d1=makeDragon(); dragonGroup.add(d1);
+  const d2=makeDragon(); d2.scale.x=-1; dragonGroup.add(d2);
+}
+/* emblem between the dragons: originally a crown, later an anchor + horse head (maritime & transport) */
+const emblemGroup=new T.Group(); emblemGroup.position.copy(dragonGroup.position); roofGroup.add(emblemGroup);
+{
+  const g=emblemGroup;
+  const base=new T.Mesh(new T.CylinderGeometry(0.25,0.35,0.7,8),M.red); base.position.set(0,0.35,0); g.add(base);
+  const disc=new T.Mesh(new T.CylinderGeometry(0.62,0.62,0.12,32),M.glaze); disc.rotation.x=Math.PI/2; disc.position.y=1.35; g.add(disc);
+  const rim=new T.Mesh(new T.TorusGeometry(0.64,0.05,8,32),M.gold); rim.position.y=1.35; g.add(rim);
+  // horse head silhouette (generic), extruded
+  const hs=new T.Shape(); hs.moveTo(-0.14,-0.42); hs.lineTo(-0.2,-0.05); hs.quadraticCurveTo(-0.22,0.22,-0.05,0.36); hs.lineTo(0.0,0.46); hs.lineTo(0.06,0.34);
+  hs.quadraticCurveTo(0.2,0.3,0.34,0.08); hs.lineTo(0.38,-0.02); hs.quadraticCurveTo(0.32,-0.1,0.22,-0.04); hs.lineTo(0.08,0.02); hs.quadraticCurveTo(0.08,-0.2,0.18,-0.42); hs.closePath();
+  const hg=new T.ExtrudeGeometry(hs,{depth:0.05,bevelEnabled:false});
+  for(const sd of [-1,1]){
+    const f=new T.Group(); f.position.set(0,1.35,0.065*sd); if(sd<0) f.rotation.y=Math.PI; g.add(f);
+    const shaft=new T.Mesh(new T.BoxGeometry(0.06,0.8,0.04),M.gold); shaft.position.x=-0.18; f.add(shaft);
+    const stock=new T.Mesh(new T.BoxGeometry(0.4,0.06,0.04),M.gold); stock.position.set(-0.18,0.28,0); f.add(stock);
+    const arms=new T.Mesh(new T.TorusGeometry(0.24,0.035,6,18,Math.PI),M.gold); arms.rotation.z=Math.PI; arms.position.set(-0.18,-0.16,0); f.add(arms);
+    const horse=new T.Mesh(hg,M.gold); horse.scale.setScalar(0.85); horse.position.set(0.12,0,-0.02); f.add(horse);
+  }
+  g.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
+}
+
+
+/* ---------- interior point lights ---------- */
+for(const [x,y,z] of [[-13,4.6,1],[0,4.6,2],[13,4.6,1],[-13,9.6,1],[0,9.6,2],[13,9.6,1]]){
+  const l=new T.PointLight(0xffe7c4,0.8,20,1.6); l.position.set(x,y,z); scene.add(l);
+}
+/* instanced balusters (all balustrades & parapets) */
+{
+  const im=new T.InstancedMesh(balGeo,M.trim,balMats.length); balMats.forEach((m,i)=>im.setMatrixAt(i,m)); im.castShadow=true; im.receiveShadow=true; scene.add(im);
+}
+
+/* ================= SITE: real geography =================
+   Bến Nhà Rồng sits on the tip of District 4 where rạch Bến Nghé meets the Sài Gòn River, at the foot of
+   Khánh Hội bridge. Frame used here: building front (+z) faces the city / Nguyễn Tất Thành street (south-west),
+   back (-z) faces the river (north-east), -x is the canal mouth & District 1, +x the Khánh Hội port downstream,
+   Thủ Thiêm lies across the river. */
+const LQ={collide:false,occlude:false,cast:false};
+const lq=(c,o)=>std(Object.assign({color:c,roughness:.9},o||{}));
+const treePts=[];
+const grassTex=TX.grass.clone(); grassTex.needsUpdate=true; grassTex.repeat.set(1/6,1/6);
+const grassMat=std({map:grassTex,roughness:.95});
+function land(pts,mat,top){ // pts: [x,z] world; extruded 3 m down from y=top
+  const sh=new T.Shape(); pts.forEach(([x,z],i)=> i? sh.lineTo(x,-z) : sh.moveTo(x,-z));
+  const g=new T.ExtrudeGeometry(sh,{depth:3,bevelEnabled:false}); g.rotateX(-Math.PI/2);
+  const m=new T.Mesh(g,mat); m.position.y=(top||0)-3; m.receiveShadow=true; scene.add(m); return m;
+}
+// District 4 tip (our side): river edge along z=-14, canal edge on the diagonal x+z=-62
+const RZ=-52; // river edge in front of the main (river-facing) facade
+const groundMesh=land([[-48,RZ],[620,RZ],[620,520],[-620,520]],grassMat); occluders.push(groundMesh);
+addCollider(-48,-3,RZ,620,0,520);
+for(let x=-620;x<-48;x+=6) addCollider(x,-3,-100-x,x+6,0,520);
+// District 1 across the canal (x+z<-161), bounded by the river running north (x-z<-89)
+land([[-125,-74],[-560,-509],[-1100,-509],[-1100,520],[-719,520]],grassMat);
+// Thủ Thiêm across the river (z<-264, x-z>265)
+land([[1,-302],[1100,-302],[1100,-938],[-635,-938]],grassMat);
+// stone embankments
+{ const qm=M.stone;
+  boxMM(-48,-3,RZ-0.4,620,0.05,RZ+0.4,qm,{collide:false});
+  const L=Math.hypot(572,572); const k=new T.Mesh(new T.BoxGeometry(L,3.05,0.8),qm); k.position.set((-48-620)/2,-1.47,(RZ+520)/2); k.rotation.y=Math.PI/4; scene.add(k); }
+boxMM(-28,0,-13,28,0.03,13,M.stone,{cast:false});            // walk around the building
+boxMM(-25,0,-46,25,0.03,-13,M.stone,{cast:false});           // statue plaza on the river side
+boxMM(-90,0,RZ+0.4,140,0.04,-46,M.stone,{cast:false});        // riverside promenade
+boxMM(-4,0,13,4,0.03,47.6,M.stone,{cast:false});              // path from the street gate
+{ const c=new T.Mesh(new T.CircleGeometry(9,40),std({map:TX.stone,roughness:.9})); c.rotation.x=-Math.PI/2; c.position.set(0,0.035,24); c.receiveShadow=true; scene.add(c); }
+for(let x=-88;x<=138;x+=2.2) cyl(0.05,0.05,1.0,M.iron,x,0.5,RZ+0.7,{seg:6,cast:false});
+boxMM(-90,0.95,RZ+0.62,140,1.05,RZ+0.78,M.iron,{occlude:false}); addCollider(-90,0,RZ+0.5,140,1.05,RZ+0.9);
+addCollider(-1800,-9,-1200,1800,-1.35,1200); // river bed (wading depth)
+/* river + canal: one water plane under the land */
+const water=(()=>{
+  const g=new T.PlaneGeometry(1800,1300,150,100); g.rotateX(-Math.PI/2);
+  const m=new T.MeshStandardMaterial({color:0x6c7c66,roughness:.22,metalness:.12});
+  const w=new T.Mesh(g,m); w.position.set(0,-1.0,-150); w.receiveShadow=true; scene.add(w);
+  w.userData.base=Float32Array.from(g.attributes.position.array); return w;
+})();
+/* Nguyễn Tất Thành street in front of the gate, with sidewalks and lane marks */
+{ const asph=std({color:0x3b3d40,roughness:.95}), side=std({color:0xb9b2a4,roughness:.9}), line=std({color:0xf2f0e6});
+  boxMM(-90,0,50,620,0.05,62,asph,{cast:false}); boxMM(-90,0,47.6,620,0.12,50,side,{cast:false}); boxMM(-90,0,62,620,0.12,64.4,side,{cast:false});
+  for(let x=-86;x<600;x+=9) boxMM(x,0.05,55.9,x+4.5,0.06,56.1,line,LQ); }
+/* connector from the bridge landing to the street */
+{ const L=Math.hypot(30,30), m=new T.Mesh(new T.BoxGeometry(12,0.06,L),std({color:0x3b3d40,roughness:.95})); m.position.set(-54,0.03,37); m.rotation.y=Math.PI/4; m.receiveShadow=true; scene.add(m); }
+/* Khánh Hội bridge over the canal mouth, landing on Nguyễn Tất Thành beside the museum */
+{
+  const deck=std({color:0x9da3a6,roughness:.85}), rail=std({color:0xd8dcdc});
+  const g=new T.Group(); g.position.set(-120,0,-29.5); g.rotation.y=Math.PI/4; scene.add(g); // spans the canal mouth, lands beside the grounds
+  const add=(w,h,d,x,y,z,m,rz)=>{ const b=new T.Mesh(new T.BoxGeometry(w,h,d),m); b.position.set(x,y,z); if(rz) b.rotation.z=rz; b.castShadow=true; b.receiveShadow=true; g.add(b); return b; };
+  // group-local z runs along the bridge (world direction (1,1)/√2)
+  add(18,1.0,70,0,7.5,0,deck);                       // main span over the canal
+  for(const s of [-1,1]){ add(0.4,1.1,70,s*8.8,8.55,0,rail); add(18,1.0,40,0,4,s*55,deck).rotation.x = s*0.19; }
+  for(const z of [-25,-8,8,25]) add(14,9,2.4,0,2.5,z,deck);
+}
+// annex of the museum compound (long, low, tiled) to the right
+boxMM(27,0,-9,58,5,4,M.salmon,{occlude:true});
+for(let x=29;x<57;x+=3.2) boxMM(x,1.2,3.98,x+1.4,3.6,4.06,M.glassDark,LQ);
+{ const r=hipRoof(26.4,58.6,-9.6,4.6,5,0.45); scene.add(r.mesh); }
+// river port to the right: terminal, sheds, cranes, cruise ship
+boxMM(66,0,-46,98,14,-30,lq(0xf1f1ee),{occlude:false,cast:false});
+for(let y=2;y<14;y+=3) boxMM(65.9,y,-46.1,98.1,y+1.2,-29.9,lq(0x5c86a6,{roughness:.3}),LQ);
+boxMM(96,0,-10,140,7,4,lq(0xd9d3c5),LQ); { const r=hipRoof(95.6,140.4,-10.4,4.4,7,0.3); r.mesh.material=lq(0xc8673f); scene.add(r.mesh); }
+for(const cx of [104,120]){
+  const cm=lq(0xd8452f);
+  for(const [dx,dz] of [[-3,-3],[3,-3],[-3,3],[3,3]]) boxMM(cx+dx-0.4,0,-56+dz-0.4,cx+dx+0.4,30,-56+dz+0.4,cm,LQ);
+  boxMM(cx-4,28,-78,cx+4,31,-50,lq(0xeeeeea),LQ);
+}
+boxMM(130,-2,-72,210,6,-60,lq(0xf4f4f2),LQ); boxMM(145,6,-70,200,12,-62,lq(0xe8eef0),LQ); boxMM(150,12,-69,190,16,-63,lq(0xf4f4f2),LQ);
+boxMM(186,16,-67,190,22,-65,lq(0x2f5f8a),LQ);
+for(const [x,z] of [[70,-80],[86,-90],[40,-100],[-60,-110],[-130,-95]]) boxMM(x,-1.4,z-2,x+10,1.2,z+2,lq(0xf2f0ea),LQ);
+// blue glass office tower beyond the right fence (seen in the front photo)
+boxMM(46,0,28,64,46,46,lq(0x5c8fb3,{roughness:.25,metalness:.45}),{occlude:false,cast:true});
+for(let y=4;y<46;y+=4) boxMM(45.9,y,27.9,64.1,y+0.35,46.1,lq(0xdfe6ea),LQ);
+/* city around (low detail): District 4 behind the street, District 1 towers across the canal, Thủ Thiêm across the river */
+{
+  const concrete=[0xcfc7b8,0xd9d4ca,0xbfb7a8,0xe6e1d6,0xc9c2b2].map(c=>lq(c)), glass=[lq(0x6f8fa6,{roughness:.3,metalness:.4}),lq(0x8aa3b3,{roughness:.3,metalness:.35}),lq(0x4f6b80,{roughness:.25,metalness:.45})];
+  const bands=lq(0x40505c);
+  const block=(x,z,w,d,h,m)=>{ boxMM(x-w/2,0,z-d/2,x+w/2,h,z+d/2,m,LQ); if(h>20) for(let y=5;y<h-2;y+=6) boxMM(x-w/2-0.05,y,z-d/2-0.05,x+w/2+0.05,y+0.5,z+d/2+0.05,bands,LQ); };
+  for(let x=-70;x<320;x+=26) for(let z=78;z<300;z+=24){ const h=(rnd()<0.15? 35+rnd()*40 : 6+rnd()*18); block(x+rnd()*6,z+rnd()*6,14+rnd()*8,12+rnd()*6,h,h>30?glass[(rnd()*3)|0]:concrete[(rnd()*5)|0]); }
+  [[-240,-40,26,140],[-280,-10,22,110],[-210,-100,20,95],[-320,-120,28,160],[-260,-150,22,120],[-350,-40,24,90],[-300,60,26,70],[-380,30,22,105],[-420,-80,30,130],[-230,40,18,60],[-200,-170,20,80]].forEach(([x,z,w,h],i)=>block(x,z,w,w*0.8,h,i%3?glass[i%3]:concrete[i%5]));
+  for(let i=0;i<40;i++){ const x=-200-rnd()*400, z=-200+rnd()*500; if(x+z<-200 && x-z<-120) block(x,z,16+rnd()*10,14+rnd()*8,10+rnd()*30,concrete[(rnd()*5)|0]); }
+  [[70,-330,24,95],[120,-370,26,120],[20,-400,22,80],[180,-340,28,70],[-60,-520,24,100]].forEach(([x,z,w,h],i)=>block(x,z,w,w,h,glass[i%3]));
+}
+/* outdoor exhibition boards on the lawn (right) */
+for(let r=0;r<2;r++) for(let i=0;i<8;i++){ const x=29+i*2.1, z=20+r*6;
+  boxMM(x,0,z,x+1.4,2.3,z+0.14,lq(0xf7f7f4),{occlude:false});
+  boxMM(x+0.1,0.6,z+0.141,x+1.3,2.1,z+0.15,lq(0x6f8fa8,{roughness:.6}),LQ); }
+/* parked cars on the left lane */
+for(let i=0;i<8;i++){ const z=13+i*3.4, col=[0xf2f2f0,0xb9bec2,0x1c1f22,0x23436b,0xf2f2f0,0x8a1c1c,0xb9bec2,0xf2f2f0][i];
+  const bm=lq(col,{roughness:.35,metalness:.4});
+  boxMM(-33.2,0.25,z-0.85,-28.8,1.05,z+0.85,bm,{occlude:false});
+  boxMM(-32.3,1.05,z-0.75,-29.9,1.6,z+0.75,bm,LQ); boxMM(-32.25,1.1,z-0.76,-29.95,1.5,z+0.76,M.glassDark,LQ);
+  for(const dx of [-32.3,-29.7]) for(const dz of [-0.85,0.85]) boxMM(dx-0.32,0,z+dz-0.1,dx+0.32,0.6,z+dz+0.1,M.black,LQ); }
+
+/* trees (instanced): dense canopy around the grounds as in the aerial photo, street trees, far-bank tree lines */
+{
+  const no=[[-29,-14,29,13.5],[-26,-47,26,-12],[-95,-53,700,-45],[26,-10,59,5],[27,18,47,29],[-34.5,11,-27.5,40],[-90,47,700,65],[45,27,65,47],[-10,14,10,34],[-5,12,5,48],[66,-47,99,-29],[-80,10,-36,56]];
+  const ok=(x,z)=>!no.some(([a,b,c,d])=>x>a&&x<c&&z>b&&z<d) && x+z>-96;
+  const placed=[];
+  let tries=0;
+  while(placed.length<150 && tries<6000){ tries++; const x=-62+rnd()*160, z=-45+rnd()*92;
+    if(!ok(x,z)) continue; if(placed.some(([px,pz])=>Math.hypot(px-x,pz-z)<6.2)) continue; placed.push([x,z]); treePts.push([x,z,1.25+rnd()*0.6,true]); }
+  for(const s of [-1,1]) for(let z=-44;z<=-16;z+=7) treePts.push([s*(29+rnd()*2),z,1.3+rnd()*0.4,true]);
+  for(let x=-80;x<=260;x+=10){ treePts.push([x+rnd()*2,48.8,1.0+rnd()*0.3,true]); treePts.push([x+rnd()*2,63.3,1.0+rnd()*0.3,true]); }
+  for(let x=10;x<=700;x+=11) treePts.push([x+rnd()*5,-272-rnd()*14,1.4+rnd()*0.9,false]);
+  for(let z=-270;z>=-800;z-=11) treePts.push([z+275+8+rnd()*6,z+rnd()*4,1.4+rnd()*0.9,false]);
+  for(let i=0;i<160;i++){ const x=-200+rnd()*900, z=-290-rnd()*300; if(x-z>285) treePts.push([x,z,1.2+rnd()*1.0,false]); }
+  for(let z=-40;z<500;z+=12){ const x=-161-z-6; treePts.push([x-rnd()*4,z,1.2+rnd()*0.6,false]); }
+}
+{
+  const n=treePts.length;
+  const trunk=new T.InstancedMesh(new T.CylinderGeometry(0.22,0.32,1,6),M.woodDark,n);
+  const leaf=new T.InstancedMesh(new T.IcosahedronGeometry(1,0),std({color:0xffffff,flatShading:true,roughness:.9}),n*3);
+  const col=new T.Color();
+  treePts.forEach(([x,z,s,c],i)=>{
+    const by=0;
+    _m4.compose(new V3(x,by+2.2*s,z),_q,new V3(s,4.4*s,s)); trunk.setMatrixAt(i,_m4);
+    for(let k=0;k<3;k++){ const r=(1.8+rnd()*1.0)*s; _m4.compose(new V3(x+(rnd()-.5)*2.4*s,by+(4.6+rnd()*1.6)*s,z+(rnd()-.5)*2.4*s),_q,new V3(r,r*0.85,r)); leaf.setMatrixAt(i*3+k,_m4);
+      col.setHSL(0.25+rnd()*0.07,0.45,0.24+rnd()*0.1); leaf.setColorAt(i*3+k,col); }
+    if(c) addCollider(x-0.35*s,0,z-0.35*s,x+0.35*s,4*s,z+0.35*s);
+  });
+  trunk.castShadow=leaf.castShadow=true; scene.add(trunk); scene.add(leaf);
+}
+/* lamps along the quay and the plaza */
+for(let x=-84;x<=136;x+=12){ cyl(0.07,0.1,3.6,M.iron,x,1.8,RZ+2,{collide:true,seg:8}); const g=new T.Mesh(new T.SphereGeometry(0.25,10,8),new T.MeshBasicMaterial({color:0xfff2cc})); g.position.set(x,3.75,RZ+2); scene.add(g); }
+for(const s of [-1,1]) for(let z=-42;z<=-16;z+=13){ cyl(0.07,0.1,4.2,M.iron,s*20,2.1,z,{collide:true,seg:8}); const g=new T.Mesh(new T.SphereGeometry(0.28,10,8),new T.MeshBasicMaterial({color:0xfff2cc})); g.position.set(s*20,4.4,z); scene.add(g); }
+
+/* ---------- wharf (cầu tàu) ---------- */
+boxMM(-28,-0.3,RZ-5.2,28,0.03,RZ,M.wood);
+for(let x=-27;x<=27;x+=3) for(const z of [RZ-4.9,RZ-2.6,RZ-0.4]) cyl(0.16,0.16,5,M.woodDark,x,-2.8,z,{cast:false,seg:6});
+const bollards=[];
+for(let x=-24;x<=24;x+=8){ bollards.push(cyl(0.22,0.28,0.6,M.iron,x,0.33,RZ-4.7,{collide:true,seg:10})); }
+
+/* replica junk with fan sails moored by the museum (seen in the aerial photo) */
+{
+  const g=new T.Group(); g.position.set(-10,0,RZ-13); scene.add(g);
+  const hullM=lq(0x3a2a1f,{roughness:.7}), redM=lq(0x8e2a1e), sailM=lq(0x2a2522,{side:T.DoubleSide,roughness:.95});
+  const hull=new T.BoxGeometry(30,4.2,8,20,2,1); { const p=hull.attributes.position; for(let i=0;i<p.count;i++){ const x=p.getX(i), y=p.getY(i); const t=Math.abs(x)/15; p.setZ(i,p.getZ(i)*(1-0.55*t*t)*(0.75+0.25*(y+2.1)/4.2)); p.setY(i,y+ (t*t)*1.6*(y>0?1:0.4)); } hull.computeVertexNormals(); }
+  const hm=new T.Mesh(hull,hullM); hm.position.y=0.6; g.add(hm);
+  const deck=new T.Mesh(new T.BoxGeometry(22,0.2,6.4),M.wood); deck.position.y=2.75; g.add(deck);
+  const cab=new T.Mesh(new T.BoxGeometry(8,2.4,5),lq(0x5a3a26)); cab.position.set(-7,4,0); g.add(cab);
+  const cr=hipRoof(-11.4,-2.6,-2.9,2.9,5.2,0.5); cr.mesh.material=redM; g.add(cr.mesh);
+  const stern=new T.Mesh(new T.BoxGeometry(4,2.2,6),hullM); stern.position.set(-13,3.8,0); g.add(stern);
+  for(const [mx,h] of [[9,16],[1,19],[-6,13]]){
+    const m=new T.Mesh(new T.CylinderGeometry(0.16,0.24,h,8),M.woodDark); m.position.set(mx,2.8+h/2,0); g.add(m);
+    const sh=new T.Shape(); const w=h*0.5; sh.moveTo(0,0); sh.lineTo(w,0); sh.quadraticCurveTo(w*1.15,h*0.5,w*0.75,h*0.82); sh.lineTo(-w*0.1,h*0.82); sh.closePath();
+    const sail=new T.Mesh(new T.ShapeGeometry(sh),sailM); sail.position.set(mx-w*0.3,2.8+h*0.12,0.25); g.add(sail);
+    for(let k=1;k<7;k++){ const yy=h*0.82*k/7; const b=new T.Mesh(new T.BoxGeometry(w*1.05,0.08,0.1),M.woodDark); b.position.set(mx-w*0.3+w*0.52,2.8+h*0.12+yy,0.32); g.add(b); }
+  }
+  g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; } });
+  addCollider(-25,-3,RZ-17,5,3,RZ-9);
+}
+
+/* ================= SHIP ================= */
+function buildShip(){
+  const g=new T.Group();
+  const taper=(x)=> x>20 ? 1-Math.pow((x-20)/12,2)*0.92 : (x<-26 ? 1-Math.pow((-26-x)/6,2)*0.45 : 1);
+  const hull=new T.BoxGeometry(64,7.2,11,40,8,1);
+  const p=hull.attributes.position, cols=[];
+  for(let i=0;i<p.count;i++){ const x=p.getX(i), y=p.getY(i); let z=p.getZ(i); z*=taper(x)*(0.72+0.28*(y+3.6)/7.2); p.setZ(i,z);
+    const wy=y+0.2; const c = wy>3.35? [0.93,0.91,0.86] : (wy>-0.8? [0.08,0.08,0.09] : [0.55,0.13,0.1]); cols.push(...c); }
+  hull.setAttribute('color',new T.Float32BufferAttribute(cols,3)); hull.computeVertexNormals();
+  const hm=new T.Mesh(hull,std({vertexColors:true,roughness:.6})); hm.position.y=0.2; g.add(hm);
+  const deck=new T.BoxGeometry(63.6,0.2,10.6,40,1,1); const dp=deck.attributes.position;
+  for(let i=0;i<dp.count;i++) dp.setZ(i,dp.getZ(i)*taper(dp.getX(i)));
+  deck.computeVertexNormals(); const dm=new T.Mesh(deck,M.wood); dm.position.y=3.9; g.add(dm);
+  const B=(x0,y0,z0,x1,y1,z1,m)=>{ const b=new T.Mesh(new T.BoxGeometry(x1-x0,y1-y0,z1-z0),m); b.position.set((x0+x1)/2,(y0+y1)/2,(z0+z1)/2); g.add(b); return b; };
+  B(-8,4,-3.5,10,6.6,3.5,M.white); B(-8.05,5.2,-3.55,10.05,5.8,3.55,M.glassDark);
+  B(2,6.6,-3,8,8.6,3,M.white); B(1.95,7.6,-3.05,8.05,8.2,3.05,M.glassDark);
+  B(-9,6.6,-4.2,11,6.75,4.2,M.wood);
+  const fun=new T.Mesh(new T.CylinderGeometry(1.25,1.35,7,20),M.black); fun.position.set(-2,10.1,0); g.add(fun);
+  const band=new T.Mesh(new T.CylinderGeometry(1.29,1.31,1.0,20),M.white); band.position.set(-2,11.6,0); g.add(band);
+  for(const [mx,h] of [[22,18],[-20,16]]){ const m=new T.Mesh(new T.CylinderGeometry(0.16,0.26,h,10),M.woodDark); m.position.set(mx,4+h/2,0); g.add(m);
+    const y=new T.Mesh(new T.CylinderGeometry(0.08,0.08,8,6),M.woodDark); y.rotation.x=Math.PI/2; y.position.set(mx,4+h*0.78,0); g.add(y);
+    for(const [tx,tz] of [[mx+(mx>0?9:-9),0],[mx,4.8],[mx,-4.8]]){ const a=new V3(mx,4+h-0.3,0), b=new V3(tx,4.2,tz); const L=a.distanceTo(b); const r=new T.Mesh(new T.CylinderGeometry(0.025,0.025,L,4),M.black); r.position.copy(a).add(b).multiplyScalar(.5); r.quaternion.setFromUnitVectors(new V3(0,1,0), b.clone().sub(a).normalize()); g.add(r); } }
+  for(const s of [-1,1]) for(const x of [-6,-1,4]){ const lb=new T.Mesh(new T.CylinderGeometry(0.6,0.6,3.4,10,1,false,0,Math.PI),M.white); lb.rotation.z=Math.PI/2; lb.rotation.y=0; lb.position.set(x,7.3,3.9*s); g.add(lb); }
+  // name boards
+  const [c,x]=cnv(1024,96); x.fillStyle='rgba(0,0,0,0)'; x.clearRect(0,0,1024,96); x.fillStyle='#e9dcc0'; x.font='600 60px "Be Vietnam Pro", sans-serif'; x.textBaseline='middle'; x.fillText('AMIRAL LATOUCHE-TRÉVILLE',18,52);
+  const nt=tex(c,false); const nm=new T.MeshBasicMaterial({map:nt,transparent:true});
+  for(const s of [-1,1]){ const pl=new T.Mesh(new T.PlaneGeometry(13,1.2),nm); pl.position.set(12,2.5,5.52*s); if(s<0) pl.rotation.y=Math.PI; g.add(pl); }
+  g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
+  return g;
+}
+
+/* ================= EXHIBIT HELPERS ================= */
+const pickables=[];
+const exhibits={};
+const SRC={
+  bennharong:['Bảo tàng Hồ Chí Minh – chi nhánh TP.HCM (bennharong.vn)','https://bennharong.vn/'],
+  nhandan:['Báo Nhân Dân – “Bến Nhà Rồng 150 năm trước”','https://nhandan.vn/post-565576.html'],
+  znews:['Znews – Nguồn gốc tên gọi Bến Nhà Rồng','https://znews.vn/nguon-goc-ten-goi-ben-nha-rong-post1595414.html'],
+  wiki:['Wikipedia tiếng Việt – Bến Nhà Rồng','https://vi.wikipedia.org/wiki/B%E1%BA%BFn_Nh%C3%A0_R%E1%BB%93ng'],
+  wikiHCM:['Wikipedia tiếng Việt – Hồ Chí Minh','https://vi.wikipedia.org/wiki/H%E1%BB%93_Ch%C3%AD_Minh'],
+  info360:['Bảo tàng Hồ Chí Minh – chi nhánh TP.HCM: trang giới thiệu tham quan 360°','https://bennharong.hochiminh.vn/BenNhaRongdata/pano/info.html'],
+  tuoitre:['Tuổi Trẻ – Sao không có bến thủy ở Bến Nhà Rồng?','https://tuoitre.vn/sao-khong-co-ben-thuy-o-ben-nha-rong-20221008090645809.htm'],
+  vtc:['VTC News – Bến Nhà Rồng có từ bao giờ, vì sao có cái tên này','https://vtcnews.vn/ben-nha-rong-co-tu-bao-gio-vi-sao-co-cai-ten-nay-ar1033914.html'],
+  vinwonders:['VinWonders – Bảo tàng Hồ Chí Minh chi nhánh TP.HCM','https://vinwonders.com/vi/wonderpedia/news/bao-tang-ho-chi-minh-chi-nhanh-tp-hcm/'],
+  tour3d:['Tham quan 360° Bến Nhà Rồng – Bảo tàng Hồ Chí Minh','https://bennharong.hochiminh.vn/'],
+  vnnCars:['Việt Nam News – Xe của Chủ tịch Hồ Chí Minh được công nhận bảo vật quốc gia','https://ovietnam.vietnamnews.vn/president-ho-chi-minh39s-cars-recognised-as-national-treasures-post366264.html']
+};
+function markerTex(fill,ring){ const [c,x]=cnv(128,128); x.translate(64,64);
+  x.fillStyle='rgba(0,0,0,.35)'; x.beginPath(); x.arc(0,0,56,0,7); x.fill();
+  x.strokeStyle=ring; x.lineWidth=6; x.beginPath(); x.arc(0,0,48,0,7); x.stroke();
+  x.fillStyle=fill; x.beginPath(); x.moveTo(0,-30); x.lineTo(22,0); x.lineTo(0,30); x.lineTo(-22,0); x.closePath(); x.fill();
+  const t=tex(c,false); return t; }
+const MK_NEW=markerTex('#e2ab47','#f3d58f'), MK_SEEN=markerTex('#73b8a3','#b9e3d5');
+
+function regExhibit(id, roots, markerPos){
+  const ex=exhibits[id]; ex.mats=[]; ex.roots=roots;
+  const map=new Map();
+  for(const root of roots){
+    root.traverse(o=>{ if(!o.isMesh) return;
+      const swap=(mm)=>{ if(!map.has(mm)){ const c=mm.clone(); if(!('emissive' in c)) { map.set(mm,mm); return mm; } map.set(mm,c); ex.mats.push(c);} return map.get(mm); };
+      o.material = Array.isArray(o.material)? o.material.map(swap) : swap(o.material);
+      o.userData.ex=id; pickables.push(o);
+    });
+  }
+  const sp=new T.Sprite(new T.SpriteMaterial({map:MK_NEW,depthWrite:false,transparent:true}));
+  sp.scale.set(0.55,0.55,0.55); sp.position.copy(markerPos); sp.userData.baseY=markerPos.y; scene.add(sp);
+  ex.marker=sp; ex.pos=markerPos.clone();
+}
+
+/* paper-style panel texture */
+function drawPanel(o){
+  const W=1024, H=Math.round(W*o.h/o.w), S=o.res||1; const [c,x]=cnv(W*S,H*S); x.scale(S,S);
+  const g=x.createLinearGradient(0,0,0,H); g.addColorStop(0,o.bg||'#efe5cd'); g.addColorStop(1,o.bg2||'#e2d4b4'); x.fillStyle=g; x.fillRect(0,0,W,H);
+  x.strokeStyle=o.ink2||'#8a5a2b'; x.lineWidth=10; x.strokeRect(14,14,W-28,H-28); x.lineWidth=2; x.strokeRect(34,34,W-68,H-68);
+  const ink=o.ink||'#2a211a'; let y=90;
+  if(o.eyebrow){ x.fillStyle=o.ink2||'#8a5a2b'; x.font='600 30px "Be Vietnam Pro", sans-serif'; x.fillText(o.eyebrow.toUpperCase(),70,y); y+=60; }
+  if(o.year){ x.fillStyle='#a9662a'; x.font='italic 500 '+(o.yearSize||96)+'px "Spectral", Georgia, serif'; x.fillText(o.year,66,y+50); y+= (o.yearSize||96)+20; }
+  if(o.title){ x.fillStyle=ink; x.font='700 '+(o.titleSize||58)+'px "Spectral", Georgia, serif'; for(const l of wrapLines(x,o.title,W-140)){ x.fillText(l,70,y+20); y+=(o.titleSize||58)*1.1; } y+=24; }
+  if(o.lines){ x.fillStyle='#4a3b2c'; x.font='400 '+(o.textSize||30)+'px "Be Vietnam Pro", sans-serif'; for(const para of o.lines){ for(const l of wrapLines(x,para,W-140)){ if(y>H-70) break; x.fillText(l,70,y+10); y+=(o.textSize||30)*1.45; } y+=14; } }
+  if(o.draw) o.draw(x,W,H);
+  return tex(c,false);
+}
+function panel(o){ // o: w,h, pos, rotY, ...draw options
+  const grp=new T.Group();
+  const frame=new T.Mesh(new T.BoxGeometry(o.w+0.14,o.h+0.14,0.06),M.woodDark); grp.add(frame);
+  const face=new T.Mesh(new T.PlaneGeometry(o.w,o.h),std({map:drawPanel(o),roughness:.8})); face.position.z=0.035; grp.add(face);
+  grp.position.copy(o.pos); grp.rotation.y=o.rotY||0; scene.add(grp);
+  return grp;
+}
+function docTex(o){ // document / book cover
+  const W=512,H=Math.round(512*(o.ratio||1.35)); const [c,x]=cnv(W,H);
+  x.fillStyle=o.bg||'#efe6cf'; x.fillRect(0,0,W,H);
+  if(o.border){ x.strokeStyle=o.border; x.lineWidth=8; x.strokeRect(18,18,W-36,H-36); }
+  x.fillStyle=o.ink||'#2b241c'; x.textAlign='center';
+  let y=o.top||90;
+  for(const [txt,font,gap] of o.rows){ x.font=font; for(const l of wrapLines(x,txt,W-80)){ x.fillText(l,W/2,y); y+=gap; } }
+  if(o.typed){ x.textAlign='left'; x.fillStyle='rgba(43,36,28,.6)'; x.font='400 15px "JetBrains Mono", monospace'; for(let i=0;i<o.typed;i++){ const w=320+Math.random()*120; x.fillRect(48,y+i*24,w,2.2); } }
+  for(let i=0;i<500;i++){ x.fillStyle=`rgba(120,90,40,${Math.random()*.05})`; x.fillRect(Math.random()*W,Math.random()*H,2,2); }
+  return tex(c,false);
+}
+function vitrine(x,z,y0,docs){ // docs: [{tex, w, h}]
+  const grp=new T.Group(); grp.position.set(x,y0,z); scene.add(grp);
+  const ped=new T.Mesh(new T.BoxGeometry(1.5,0.95,1.0),M.woodDark); ped.position.y=0.475; ped.castShadow=true; grp.add(ped);
+  const top=new T.Mesh(new T.BoxGeometry(1.4,0.04,0.9),std({color:0x5a2b22,roughness:.9})); top.position.y=0.97; grp.add(top);
+  docs.forEach((d,i)=>{ const pl=new T.Mesh(new T.PlaneGeometry(d.w,d.h),std({map:d.tex,roughness:.85,side:T.DoubleSide})); pl.rotation.x=-Math.PI/2+0.35; pl.position.set((i-(docs.length-1)/2)*0.62,1.1,0); grp.add(pl); });
+  const gl=new T.Mesh(new T.BoxGeometry(1.42,0.6,0.92),M.vitrine); gl.position.y=1.3; grp.add(gl);
+  addCollider(x-0.75,y0,z-0.5,x+0.75,y0+1.6,z+0.5);
+  return grp;
+}
+
+/* ================= EXHIBIT CONTENT ================= */
+const DATA={
+ dragons:{tag:'Đỉnh mái · Biểu tượng', year:'1863', title:'Đôi rồng “Lưỡng long chầu nguyệt”',
+  body:['Trên đỉnh mái là hai con rồng lớn bằng gạch nung tráng men xanh, uốn mình cúi đầu về phía phù hiệu ở giữa theo mô típ “lưỡng long chầu nguyệt” quen thuộc trong kiến trúc Việt Nam và Á Đông.',
+        'Người Sài Gòn xưa nhìn đôi rồng mà gọi tòa nhà là “Nhà Rồng”, và tên gọi dân gian ấy dần trở thành tên chính thức của cả bến cảng: Bến Nhà Rồng.'],
+  facts:[['Chất liệu','Gạch nung tráng men xanh'],['Vị trí','Đỉnh mái chính, hướng ra hai phía'],['Ý nghĩa','Nguồn gốc tên gọi “Nhà Rồng”']],
+  note:'Theo báo VTC, hai con rồng bằng gạch nung tráng men xanh, cúi đầu về phù hiệu ở giữa. Hình dáng rồng trong mô hình là phỏng dựng, không sao chép chi tiết tượng thật.', src:['vtc','nhandan','znews']},
+ anchor:{tag:'Đỉnh mái · Giữa đôi rồng', year:'Vương miện → mỏ neo', title:'Biểu tượng giữa đôi rồng',
+  body:['Hai con rồng trên nóc cúi đầu về phía một phù hiệu ở giữa, tạo thế “lưỡng long chầu nguyệt”. Phù hiệu ban đầu là hình vương miện, gắn với tên hãng thời Đệ nhị Đế chế: Messageries Impériales (M.I.).',
+        'Về sau vương miện được thay bằng hình mỏ neo và đầu ngựa, biểu tượng của ngành hàng hải và vận tải. Sau năm 1870, hãng cũng đổi tên thành Messageries Maritimes.'],
+  facts:[['Ban đầu','Hình vương miện'],['Về sau','Mỏ neo và đầu ngựa'],['Ý nghĩa','Hàng hải, vận tải'],['Tên hãng','Messageries Impériales → Messageries Maritimes']],
+  note:'Phù hiệu trong mô hình được vẽ giản lược.', src:['vtc','nhandan']},
+ building:{tag:'Lối vào · Bia giới thiệu', year:'1862–1863', title:'Trụ sở hãng tàu bên sông Sài Gòn',
+  body:['Năm 1862, chuyến tàu hơi nước đầu tiên từ Pháp cập bến Sài Gòn, mở đầu cho “Port de Commerce de Saïgon” – Thương cảng Sài Gòn. Năm 1863, hãng tàu Messageries Impériales dựng tòa nhà hai tầng này làm trụ sở.',
+        'Đây là nơi bán vé tàu và là chỗ ở của nhân viên người Pháp điều hành tàu ra vào cảng. Kiến trúc kết hợp mặt bằng kiểu Pháp với mái ngói kiểu Á Đông và đôi rồng trên nóc.'],
+  facts:[['Địa chỉ','Số 1 Nguyễn Tất Thành, phường Xóm Chiếu, TP.HCM'],['Quy mô','2 tầng'],['Xếp hạng','Di tích kiến trúc nghệ thuật cấp thành phố'],['Giờ mở cửa (tham khảo)','Thứ Ba – CN, 7:30–11:30, 13:30–17:00'],['Vị trí','Ngã ba sông Sài Gòn – rạch Bến Nghé, chân cầu Khánh Hội, đối diện Thủ Thiêm']],
+  src:['nhandan','znews','bennharong','vinwonders','vtc','tuoitre']},
+ renovation:{tag:'Sân trước · Thông báo', year:'2026', title:'Dự án cải tạo, chỉnh trang bảo tàng',
+  body:['Ngày 30/04/2026, lễ khởi công dự án cải tạo, chỉnh trang Bảo tàng Hồ Chí Minh – chi nhánh TP.HCM được tổ chức tại Bến Nhà Rồng.',
+        'Theo trang chính thức của bảo tàng, đơn vị tạm ngưng đón khách từ 07/05/2026 đến tháng 9/2026 để thi công. Hãy kiểm tra bennharong.vn trước khi tới tham quan.'],
+  facts:[['Khởi công','30/04/2026'],['Tạm đóng cửa','07/05/2026 – tháng 9/2026'],['Liên hệ','(028) 38255740 – 39401053']],
+  src:['bennharong']},
+ ticket:{tag:'Tầng 1 · Sài Gòn những năm 1910', year:'1863', title:'Quầy bán vé của hãng tàu',
+  body:['Nhà Rồng được xây trước hết để phục vụ việc bán vé tàu: hành khách và hàng hóa đi Pháp hay các cảng châu Á đều làm thủ tục tại đây.',
+        'Tầng trên là nơi ở của nhân viên người Pháp quản lý tàu cập bến và rời bến.'],
+  facts:[['Chức năng','Bán vé, điều hành tàu'],['Đơn vị','Messageries Impériales / Maritimes']],
+  note:'Quầy vé là dựng lại minh họa chức năng ban đầu của tòa nhà.', src:['nhandan']},
+ port1862:{tag:'Tầng 1 · Sài Gòn những năm 1910', year:'1862–1912', title:'Thương cảng Sài Gòn hình thành',
+  body:['1862: tàu hơi nước đầu tiên từ Pháp cập cảng, đánh dấu sự ra đời của Thương cảng Sài Gòn.',
+        'Tháng 10/1865: nơi đây còn được gọi là “Sở Canh tân tàu biển”; cột cờ Thủ Ngữ được dựng để treo cờ hiệu báo tàu ra vào.',
+        'Cuối 1899: hãng được phép xây bến tàu đúng nghĩa. Từ 1900 đến 1912, bến Khánh Hội được sửa chữa và mở rộng.'],
+  facts:[['1862','Tàu hơi nước đầu tiên từ Pháp'],['10/1865','Cột cờ Thủ Ngữ'],['1899','Được phép xây bến'],['1900–1912','Cải tạo bến Khánh Hội']],
+  src:['nhandan','znews']},
+ wharf:{tag:'Bờ sông · Cầu tàu', year:'1899', title:'Cầu tàu trên cột sắt',
+  body:['Bến tàu năm 1899 được làm bằng ván dày đặt trên cột sắt. Các vị trí neo tàu cách nhau 18 m, mỗi cầu rộng 8 m.',
+        'Ngày 5/6 hằng năm được chọn làm ngày truyền thống của Cảng Sài Gòn. Năm 2016, cảng Nhà Rồng – Khánh Hội di dời về Hiệp Phước, trả lại hơn 32 ha đất cho thành phố.'],
+  facts:[['Kết cấu','Ván dày trên cột sắt'],['Khoảng cách neo','18 m'],['Bề rộng cầu','8 m'],['Di dời cảng','2016 – về Hiệp Phước']],
+  note:'Cầu tàu trong mô hình dùng cọc gỗ để dễ nhìn.', src:['nhandan','znews']},
+ ship_river:{tag:'Bờ sông · Bia kỷ niệm', year:'05/06/1911', title:'Tàu Amiral Latouche-Tréville rời bến',
+  body:['Ngày 4/6/1911, người thanh niên Nguyễn Tất Thành, lấy tên Văn Ba, xin làm phụ bếp trên tàu Amiral Latouche-Tréville. Sáng 5/6/1911, tàu rời Bến Nhà Rồng.',
+        'Chuyến đi mở đầu ba mươi năm bôn ba ở nước ngoài tìm đường cứu nước, trước khi Người trở về Pác Bó năm 1941.'],
+  facts:[['Lên tàu','04/06/1911'],['Rời bến','05/06/1911'],['Tên khi lên tàu','Văn Ba'],['Công việc','Phụ bếp']],
+  note:'Mô hình không dựng lại con tàu năm 1911 trên sông; mô hình tàu nằm trong tủ kính ở tầng 1. Thuyền buồm neo gần bến là cảnh nền, dựng theo ảnh chụp từ trên cao.', src:['bennharong','nhandan','znews']},
+ ship_model:{tag:'Tầng 1 · Sài Gòn những năm 1910', year:'1911', title:'Mô hình con tàu ra đi',
+  body:['Tủ kính trưng bày mô hình tàu Amiral Latouche-Tréville, con tàu đưa Nguyễn Tất Thành từ Sài Gòn sang Pháp.',
+        'Hành trình đi qua Singapore, Colombo, Port Said và cập cảng Marseille vào đầu tháng 7/1911.'],
+  facts:[['Điểm đi','Sài Gòn'],['Điểm đến','Marseille, Pháp'],['Thời gian','Tháng 6 – 7/1911']],
+  note:'Bố trí tủ kính là mô phỏng.', src:['bennharong','wikiHCM']},
+ map:{tag:'Tầng 1 · Cuộc hành trình của thời đại', year:'1911–1941', title:'Ba mươi năm tìm đường cứu nước',
+  body:['Bản đồ đánh dấu các chặng chính: Sài Gòn → Marseille (1911), Hoa Kỳ và Anh (1912–1913), Paris (1917), Moskva (1923), Quảng Châu (1924), Xiêm (1928), Hồng Kông (1930) và trở về Pác Bó, Cao Bằng (1941).',
+        'Trong ba thập niên, Người đi qua nhiều nước ở châu Âu, châu Phi, châu Mỹ và châu Á, làm nhiều nghề để sống và hoạt động.'],
+  facts:[['Khởi hành','05/06/1911 – Sài Gòn'],['Trở về','28/01/1941 – Pác Bó'],['Thời gian ở nước ngoài','30 năm']],
+  note:'Vị trí các điểm trên bản đồ là gần đúng.', src:['wikiHCM']},
+ yeusach:{tag:'Tầng 2 · Phòng chuyên đề', year:'18/06/1919', title:'Bản Yêu sách của nhân dân An Nam',
+  body:['Nhân Hội nghị Versailles sau Thế chiến thứ nhất, Nguyễn Ái Quốc thay mặt Hội những người Việt Nam yêu nước tại Pháp gửi bản yêu sách 8 điểm, đòi các quyền tự do, dân chủ tối thiểu cho người Việt.',
+        'Văn kiện ký tên Nguyễn Ái Quốc, lần đầu tiên tên gọi này xuất hiện trước công chúng.'],
+  facts:[['Nơi gửi','Hội nghị Versailles, Pháp'],['Số điểm','8'],['Ký tên','Nguyễn Ái Quốc']], src:['wikiHCM']},
+ tours:{tag:'Tầng 2 · Phòng chuyên đề', year:'12/1920', title:'Đại hội Tours',
+  body:['Tại Đại hội lần thứ 18 Đảng Xã hội Pháp ở thành phố Tours, Nguyễn Ái Quốc bỏ phiếu tán thành gia nhập Quốc tế Cộng sản và trở thành một trong những người tham gia sáng lập Đảng Cộng sản Pháp.'],
+  facts:[['Địa điểm','Tours, Pháp'],['Thời gian','Tháng 12/1920']], src:['wikiHCM']},
+ banan:{tag:'Tầng 2 · Phòng chuyên đề', year:'1925', title:'Bản án chế độ thực dân Pháp',
+  body:['Tác phẩm “Le Procès de la colonisation française” được xuất bản tại Paris năm 1925, tố cáo chính sách cai trị và bóc lột ở các thuộc địa.'],
+  facts:[['Nơi xuất bản','Paris'],['Ngôn ngữ','Tiếng Pháp']], src:['wikiHCM']},
+ duongkachmenh:{tag:'Tầng 2 · Phòng chuyên đề', year:'1927', title:'Đường Kách mệnh',
+  body:['Tập hợp các bài giảng tại lớp huấn luyện chính trị ở Quảng Châu (Trung Quốc), được Bộ Tuyên truyền Hội Liên hiệp các dân tộc bị áp bức xuất bản năm 1927.'],
+  facts:[['Nơi ra đời','Quảng Châu'],['Năm','1927']], src:['wikiHCM']},
+ pacbo:{tag:'Tầng 2 · Phòng phải', year:'28/01/1941', title:'Trở về Tổ quốc tại Pác Bó',
+  body:['Sau 30 năm ở nước ngoài, Nguyễn Ái Quốc vượt biên giới về nước, đặt chân lên cột mốc 108 ở Pác Bó, Hà Quảng, Cao Bằng, rồi ở trong hang Cốc Bó để trực tiếp lãnh đạo phong trào.'],
+  facts:[['Địa điểm','Pác Bó, Cao Bằng'],['Thời gian xa Tổ quốc','1911 – 1941']], src:['wikiHCM']},
+ tuyenngon:{tag:'Tầng 1 · Sảnh giữa', year:'Thế kỷ XI → 1945', title:'Việt Nam – những Tuyên ngôn độc lập',
+  body:['Chuyên đề đặt các văn bản khẳng định chủ quyền của dân tộc cạnh nhau: bài thơ “Nam quốc sơn hà” (thế kỷ XI), “Bình Ngô đại cáo” của Nguyễn Trãi (1428) và bản Tuyên ngôn Độc lập ngày 2/9/1945.',
+        'Tại Quảng trường Ba Đình, Chủ tịch Hồ Chí Minh đọc Tuyên ngôn Độc lập, khai sinh nước Việt Nam Dân chủ Cộng hòa. Câu mở đầu: “Tất cả mọi người đều sinh ra có quyền bình đẳng. Tạo hóa cho họ những quyền không ai có thể xâm phạm được; trong những quyền ấy, có quyền được sống, quyền tự do và quyền mưu cầu hạnh phúc.”'],
+  facts:[['Nam quốc sơn hà','Thế kỷ XI'],['Bình Ngô đại cáo','1428'],['Tuyên ngôn Độc lập','02/09/1945, Ba Đình']],
+  note:'Tên chuyên đề theo danh mục tham quan 3D của bảo tàng; vị trí trong mô hình là mô phỏng.', src:['tour3d','wikiHCM']},
+ memorial:{tag:'Tầng 1 · Sảnh giữa', year:'Tưởng niệm', title:'Phòng tưởng niệm Chủ tịch Hồ Chí Minh',
+  body:['Danh mục tham quan của bảo tàng mở đầu tầng 1 bằng Phòng tưởng niệm Chủ tịch Hồ Chí Minh, nơi khách dâng hương và hoa trước khi đi vào các phòng trưng bày.',
+        'Trong mô hình, phòng được thể hiện bằng ban thờ, bình hoa và bức phông đỏ, không dựng chân dung hay tượng.'],
+  facts:[['Vị trí','Tầng 1'],['Hoạt động','Dâng hương, dâng hoa']],
+  note:'Bố trí trong mô hình là mô phỏng.', src:['tour3d','vinwonders']},
+ miennam:{tag:'Tầng 1 · Sảnh giữa', year:'1890 – 1969', title:'Bác Hồ với miền Nam, miền Nam với Bác Hồ',
+  body:['Chuyên đề về tình cảm giữa Chủ tịch Hồ Chí Minh và đồng bào Nam Bộ: những năm tháng tuổi trẻ ở Phan Thiết, Sài Gòn trước khi ra đi năm 1911, và sự quan tâm của Người với miền Nam trong suốt các cuộc kháng chiến.',
+        'Câu nói thường được nhắc tới: “Miền Nam luôn trong trái tim tôi.”'],
+  facts:[['Chuyên đề','Tầng 1'],['Liên quan','Triển lãm “Đi qua cuộc chiến”']],
+  note:'Tên chuyên đề theo danh mục tham quan 3D của bảo tàng.', src:['tour3d','vinwonders']},
+ peugeot:{tag:'Tầng 1 · Phòng phải', year:'1964', title:'Trưng bày xe ô tô hiệu Peugeot',
+  body:['Danh mục tham quan 3D của bảo tàng có mục trưng bày “Xe ô tô hiệu Peugeot”.',
+        'Trong số các xe Chủ tịch Hồ Chí Minh từng sử dụng có chiếc Peugeot 404 (biển HNC 232) do kiều bào tặng tháng 3/1964, đi được 16.575 km. Chiếc xe này cùng xe ZIS 115 và Pobeda được công nhận Bảo vật quốc gia (Quyết định 1712/QĐ-TTg ngày 31/12/2024) và đặt tại Khu di tích Phủ Chủ tịch, Hà Nội.'],
+  facts:[['Peugeot 404','Biển HNC 232, tặng 3/1964'],['Bảo vật quốc gia','QĐ 1712/QĐ-TTg, 31/12/2024']],
+  note:'Chiếc xe trong mô hình là xe sedan giản lược, không phải bản sao xe thật; mình chưa xác minh được đời xe trưng bày tại Nhà Rồng.', src:['tour3d','vnnCars']},
+ statue:{tag:'Sân phía sông · Tượng đài', year:'05/06/2003', title:'Tượng đài “Nguyễn Tất Thành ra đi tìm đường cứu nước”',
+  body:['Tượng đài do điêu khắc gia Phạm Mười thực hiện, khánh thành ngày 5/6/2003, nhân kỷ niệm 92 năm ngày Bác ra đi tìm đường cứu nước.',
+        'Theo trang giới thiệu của bảo tàng, tượng đặt giữa sân, hướng ra sông Sài Gòn; tượng bằng kim loại, cao 330 cm, nặng 1000 kg. Tượng đứng trên bệ đá đỏ sẫm và nền tròn ba bậc, giữa hai hàng chậu sứ men lam trồng cây kiểng, lưng quay về mặt tiền tòa nhà.'],
+  facts:[['Tác giả','Điêu khắc gia Phạm Mười'],['Khánh thành','05/06/2003'],['Chất liệu','Kim loại'],['Hướng','Nhìn ra sông Sài Gòn'],['Kích thước','Cao 330 cm, nặng 1000 kg']],
+  note:'Tượng trong mô hình là hình người đứng giản lược, không thể hiện chân dung hay chi tiết tượng thật.', src:['info360','vinwonders','tour3d']},
+ denthonambo:{tag:'Tầng 2 · Phòng phải', year:'Từ 1970', title:'Đền thờ Bác Hồ ở Nam Bộ',
+  body:['Chuyên đề giới thiệu các đền thờ Bác Hồ do nhân dân Nam Bộ dựng, có nơi được xây ngay trong chiến tranh, như đền thờ Bác ở xã Long Đức, Trà Vinh, khởi dựng năm 1970.',
+        'Đây là một trong các phòng trưng bày ở tầng 2 theo danh mục tham quan của bảo tàng.'],
+  facts:[['Vị trí','Tầng 2'],['Ví dụ','Đền thờ Bác ở Long Đức, Trà Vinh']],
+  note:'Bố trí trong mô hình là mô phỏng.', src:['tour3d','vinwonders']},
+ museum:{tag:'Tầng 2 · Sảnh giữa', year:'1979 · 1995', title:'Từ khu lưu niệm đến bảo tàng',
+  body:['Sau năm 1975, tòa nhà được cải tạo thành Di tích lưu niệm Chủ tịch Hồ Chí Minh. Ngày 02/09/1979, khu lưu niệm mở cửa đón khách với trưng bày về sự nghiệp tìm đường cứu nước của Người.',
+        'Tháng 10/1995, UBND TP.HCM đổi tên thành Bảo tàng Hồ Chí Minh – chi nhánh TP.HCM. Bảo tàng được xếp hạng I trong hệ thống bảo tàng Việt Nam và nằm trong chương trình “Thành phố Hồ Chí Minh – 100 điều thú vị”.'],
+  facts:[['Mở cửa','02/09/1979'],['Đổi tên','Tháng 10/1995'],['Hạng','Bảo tàng hạng I']], src:['bennharong']},
+ chuyende:{tag:'Tầng 2 · Sảnh giữa', year:'Sơ đồ', title:'Các phòng trưng bày hai tầng',
+  body:['Tầng 1: Phòng tưởng niệm Chủ tịch Hồ Chí Minh; “Hồ Chí Minh – Cuộc hành trình của thời đại”; “Bác Hồ với miền Nam, miền Nam với Bác Hồ”; triển lãm “Đi qua cuộc chiến”; “Sài Gòn những năm 1910”; “Việt Nam – những Tuyên ngôn độc lập”; xe ô tô hiệu Peugeot.',
+        'Tầng 2: Đền thờ Bác Hồ ở Nam Bộ; bốn phòng chuyên đề theo tiến trình cách mạng, từ thời niên thiếu đến năm 1969; “Một số hình ảnh cuộc sống đời thường”; “Hồ Chí Minh và học tập suốt đời”.'],
+  facts:[['Tầng 1','7 nội dung trưng bày'],['Tầng 2','Đền thờ, 4 phòng chuyên đề, 2 chuyên đề'],['Giờ mở cửa (tham khảo)','Thứ Ba – CN, 7:30–11:30 và 13:30–17:00']],
+  note:'Danh sách theo trang tham quan 3D của bảo tàng; giờ mở cửa có thể đã thay đổi sau đợt cải tạo 2026.', src:['tour3d','vinwonders','bennharong']},
+ truss:{tag:'Kết cấu · Dưới mái', year:'Kết cấu', title:'Hệ vì kèo gỗ và mái ngói',
+  body:['Mái dốc lợp ngói đất nung, bốn mặt (mái chái), đặt trên hệ vì kèo gỗ: quá giang đỡ trụ giữa, kèo xiên đỡ đòn tay và thanh chống chéo chia lực.',
+        'Bấm R để ẩn mái và quan sát toàn bộ khung kèo từ trên cao; bấm X để nhìn xuyên tường.'],
+  facts:[['Mái','4 mặt, lợp ngói'],['Khung','Vì kèo gỗ, khoảng cách 4 m']],
+  note:'Hệ kèo được dựng theo kiểu kết cấu phổ biến để minh họa; cấu tạo thật có thể khác.', src:['nhandan']},
+ veranda:{tag:'Hành lang bao quanh', year:'Thế kỷ XIX', title:'Hành lang vòm cuốn hai tầng',
+  body:['Hành lang bao quanh cả bốn mặt tòa nhà: tầng dưới là dãy vòm cuốn, tầng trên là hàng cột với lan can con tiện trắng; tường quét màu hồng cam, viền phào chỉ trắng. Trên mái có lan can chạy quanh mép mái ở các góc.',
+        'Mặt bằng kiểu Pháp, mái ngói và đôi rồng Á Đông tạo nên dáng vẻ riêng của Nhà Rồng.'],
+  facts:[['Phong cách','Pháp kết hợp Á Đông'],['Số tầng','2'],['Mặt ngoài','Hồng cam, phào chỉ trắng']],
+  note:'Số nhịp cột và tỉ lệ trong mô hình là ước lượng theo ảnh.', src:['vtc','nhandan','znews']},
+ quehuong:{tag:'Tầng 2 · Phòng chuyên đề thứ nhất', year:'1890 – 1911', title:'Quê hương và thời niên thiếu',
+  body:['Chủ tịch Hồ Chí Minh, tên lúc nhỏ là Nguyễn Sinh Cung, sinh ngày 19/5/1890 tại làng Hoàng Trù (quê ngoại) và lớn lên ở làng Sen, xã Kim Liên, huyện Nam Đàn, tỉnh Nghệ An. Thân mẫu là bà Hoàng Thị Loan, làm ruộng và dệt vải nuôi gia đình.',
+        'Góc trưng bày dựng theo ảnh chụp phòng chuyên đề: tranh phông cong vẽ cảnh quê, ảnh và tư liệu trong khung, tủ kính có guồng quay sợi và bó chổi, hộc tường với mô hình ngôi nhà tranh, tranh khung đỏ, bản đồ những nơi Người đã đến, tủ nghiêng đặt tư liệu trên nền vải đỏ.'],
+  facts:[['Sinh','19/5/1890, làng Hoàng Trù'],['Quê nội','Làng Sen, Kim Liên, Nam Đàn, Nghệ An'],['Nhóm phòng','4 phòng chuyên đề, từ thời niên thiếu đến 1969']],
+  note:'Hiện vật trong mô hình là phỏng dựng theo ảnh chụp, không phải hiện vật gốc; ảnh trong khung chỉ là ô màu thay thế.', src:['tour3d','wikiHCM']}
+};
+for(const k in DATA) exhibits[k]={id:k, data:DATA[k]};
+
+/* ================= PLACE EXHIBITS ================= */
+const P = (x,y,z)=>new V3(x,y,z);
+// dragons + anchor (on the roof)
+regExhibit('dragons',[dragonGroup], P(-4,RIDGE_Y+2.8,ZC)); exhibits.dragons.inRoof=true;
+regExhibit('anchor',[emblemGroup], P(0,RIDGE_Y+3.3,ZC+1.6)); exhibits.anchor.inRoof=true;
+// stele + renovation board in the forecourt
+function standBoard(x,z,id,o){
+  const g=new T.Group(); scene.add(g);
+  const base=new T.Mesh(new T.BoxGeometry(o.w+0.5,0.45,0.7),M.stone); base.position.set(x,0.25,z); base.castShadow=true; g.add(base);
+  for(const s of [-1,1]){ const leg=new T.Mesh(new T.BoxGeometry(0.12,1.3,0.12),M.iron); leg.position.set(x+s*(o.w/2-0.15),0.9,z-0.06*(o.rotY?-1:1)); g.add(leg); }
+  const p=panel(Object.assign({pos:P(x,0.45+0.25+o.h/2+0.15,z)},o)); g.add(p);
+  addCollider(x-o.w/2-0.25,0,z-0.35,x+o.w/2+0.25,2.2+o.h/2,z+0.35);
+  regExhibit(id,[g], P(x,0.45+o.h+1.0,z+0.1));
+}
+standBoard(4.6,-43,'building',{rotY:Math.PI,w:2.6,h:1.7,eyebrow:'Di tích kiến trúc nghệ thuật',year:'1863',title:'Bến Nhà Rồng',lines:['Trụ sở hãng tàu Messageries Impériales, sau là Messageries Maritimes.','Nay là Bảo tàng Hồ Chí Minh – chi nhánh TP.HCM.'],textSize:34,titleSize:78});
+standBoard(-4.6,-43,'renovation',{rotY:Math.PI,w:2.2,h:1.5,eyebrow:'Thông báo',year:'2026',title:'Cải tạo, chỉnh trang bảo tàng',lines:['Khởi công 30/04/2026. Tạm ngưng đón khách từ 07/05/2026.'],bg:'#e9eadf',bg2:'#d8dccd',textSize:34});
+
+// ticket counter (ground, left room)
+{
+  const g=new T.Group(); scene.add(g);
+  const add=(geo,mat,x,y,z)=>{ const m=new T.Mesh(geo,mat); m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; g.add(m); return m; };
+  add(new T.BoxGeometry(7,1.1,0.8),M.woodDark,-14,G0+0.55,-3);
+  add(new T.BoxGeometry(7.2,0.08,1.0),M.wood,-14,G0+1.14,-3);
+  add(new T.BoxGeometry(7,0.12,0.12),M.woodDark,-14,G0+2.7,-3.05);
+  for(let x=-17.4;x<=-10.6;x+=0.18) add(new T.CylinderGeometry(0.012,0.012,1.5,4),M.gold,x,G0+1.93,-3.05);
+  for(const x of [-16,-12]) add(new T.BoxGeometry(0.9,0.05,0.4),M.paper,x,G0+1.2,-2.8);
+  const sign=new T.Mesh(new T.PlaneGeometry(4.2,0.8),std({map:drawPanel({w:4.2,h:0.8,title:'GUICHET · QUẦY BÁN VÉ',titleSize:78,bg:'#1f3b33',bg2:'#173029',ink:'#e9d9a8',ink2:'#c9a24b'}),roughness:.7}));
+  sign.position.set(-14,G0+3.3,-2.98); g.add(sign);
+  addCollider(-17.6,G0,-3.5,-10.4,G0+1.2,-2.5);
+  regExhibit('ticket',[g], P(-14,G0+4.1,-2.6));
+}
+// port history panel on partition (faces -x)
+regExhibit('port1862',[panel({w:5,h:3,pos:P(-6.24,G0+2.4,-2.8),rotY:-Math.PI/2,eyebrow:'Port de Commerce de Saïgon',year:'1862 – 1912',title:'Thương cảng Sài Gòn hình thành',
+  lines:['1862 · Tàu hơi nước đầu tiên từ Pháp cập bến.','1863 · Hãng tàu dựng trụ sở – Nhà Rồng.','10/1865 · Dựng cột cờ Thủ Ngữ treo cờ hiệu.','1899 · Được phép xây bến tàu trên cột sắt.','1900–1912 · Cải tạo, mở rộng bến Khánh Hội.'],textSize:30})], P(-6.9,G0+4.3,-2.8));
+
+// ship model vitrine in the lobby
+{
+  const g=new T.Group(); g.position.set(-13,G0,3.6); scene.add(g);
+  const ped=new T.Mesh(new T.BoxGeometry(3.0,0.85,1.2),M.woodDark); ped.position.y=0.425; ped.castShadow=true; g.add(ped);
+  const mdl=buildShip(); mdl.scale.setScalar(1/24); mdl.position.y=0.85+3.4/24; g.add(mdl);
+  const gl=new T.Mesh(new T.BoxGeometry(3.0,1.15,1.2),M.vitrine); gl.position.y=0.85+0.575; g.add(gl);
+  const lab=new T.Mesh(new T.PlaneGeometry(1.4,0.35),std({map:drawPanel({w:1.4,h:0.35,title:'Amiral Latouche-Tréville · 1911',titleSize:70}),roughness:.8})); lab.position.set(0,0.55,0.605); g.add(lab);
+  addCollider(-14.5,G0,3.0,-11.5,G0+2.0,4.2);
+  regExhibit('ship_model',[g], P(-13,G0+2.6,3.6));
+}
+// route map on the right room partition (faces +x)
+const ROUTE=[['Sài Gòn',106.7,10.8,'6/1911'],['Singapore',103.8,1.3,''],['Colombo',79.9,6.9,''],['Port Said',32.3,31.3,''],['Marseille',5.4,43.3,'7/1911'],['Le Havre',0.1,49.5,''],['New York',-74,40.7,'1912'],['London',-0.1,51.5,'1913'],['Paris',2.35,48.85,'1917'],['Moskva',37.6,55.75,'1923'],['Quảng Châu',113.3,23.1,'1924'],['Xiêm',100.5,13.75,'1928'],['Hồng Kông',114.2,22.3,'1930'],['Pác Bó',105.97,22.97,'1941']];
+function drawRoute(x,W,H){
+  const L=60,Tp=150,R=W-60,B=H-50, lon0=-95, lon1=128, lat0=-6, lat1=63;
+  const px=(lo)=>L+(lo-lon0)/(lon1-lon0)*(R-L), py=(la)=>B-(la-lat0)/(lat1-lat0)*(B-Tp);
+  x.fillStyle='rgba(70,110,110,.10)'; x.fillRect(L,Tp,R-L,B-Tp);
+  x.strokeStyle='rgba(90,70,40,.25)'; x.lineWidth=1;
+  for(let lo=-90;lo<=120;lo+=30){ x.beginPath(); x.moveTo(px(lo),Tp); x.lineTo(px(lo),B); x.stroke(); }
+  for(let la=0;la<=60;la+=15){ x.beginPath(); x.moveTo(L,py(la)); x.lineTo(R,py(la)); x.stroke(); x.fillStyle='rgba(90,70,40,.6)'; x.font='14px "JetBrains Mono", monospace'; x.fillText(la+'°N',L+4,py(la)-4); }
+  x.strokeStyle='#a4372a'; x.lineWidth=3; x.setLineDash([10,7]); x.beginPath();
+  ROUTE.forEach(([n,lo,la],i)=>{ i? x.lineTo(px(lo),py(la)) : x.moveTo(px(lo),py(la)); }); x.stroke(); x.setLineDash([]);
+  ROUTE.forEach(([n,lo,la,yr],i)=>{ const X=px(lo),Y=py(la); x.fillStyle= (i===0||i===ROUTE.length-1)?'#a4372a':'#2a211a'; x.beginPath(); x.arc(X,Y,i===0||i===ROUTE.length-1?8:5,0,7); x.fill();
+    x.font='600 17px "Be Vietnam Pro", sans-serif'; x.fillStyle='#2a211a'; const off={ 'Le Havre':[-80,-8],'Paris':[10,18],'London':[-62,-10],'Hồng Kông':[10,22],'Quảng Châu':[-108,-4],'Pác Bó':[10,-10],'Singapore':[10,16],'Xiêm':[-50,4] }[n]||[10,-8];
+    x.fillText(n+(yr?' '+yr:''),X+off[0],Y+off[1]); });
+}
+regExhibit('map',[panel({w:7,h:3.5,res:2,pos:P(6.24,G0+2.5,-2.8),rotY:Math.PI/2,eyebrow:'1911 – 1941',title:'Hành trình tìm đường cứu nước',titleSize:44,draw:drawRoute})], P(6.9,G0+4.6,-2.8));
+
+// veranda plaque
+regExhibit('veranda',[panel({w:1.1,h:1.5,pos:P(-11.15,G0+2.3,7.24),eyebrow:'Kiến trúc',title:'Hành lang vòm',titleSize:96,lines:['Cửa chớp, vòm cuốn, hành lang hai tầng.'],textSize:48})], P(-11.15,G0+3.6,7.7));
+
+// upstairs left: document vitrines
+const docs={
+  yeusach:docTex({rows:[['REVENDICATIONS','700 44px "Spectral", serif',52],['DU PEUPLE ANNAMITE','700 34px "Spectral", serif',60],['18 · 6 · 1919','500 24px "JetBrains Mono", monospace',44]],typed:12,border:'#7a5a33'}),
+  tours:docTex({rows:[['CONGRÈS DE TOURS','700 40px "Spectral", serif',56],['Décembre 1920','italic 500 30px "Spectral", serif',60]],typed:10,bg:'#e6e0d0'}),
+  banan:docTex({rows:[['LE PROCÈS','700 52px "Spectral", serif',62],['DE LA COLONISATION','600 30px "Spectral", serif',40],['FRANÇAISE','600 30px "Spectral", serif',70],['Paris · 1925','italic 500 26px "Spectral", serif',40]],bg:'#b84a35',ink:'#f3e6c8',top:140}),
+  dkm:docTex({rows:[['ĐƯỜNG','700 60px "Spectral", serif',70],['KÁCH MỆNH','700 52px "Spectral", serif',80],['1927','italic 500 34px "Spectral", serif',40]],bg:'#d8c9a0',border:'#6b4b2a',top:160}),
+  pacbo:docTex({rows:[['PÁC BÓ','700 60px "Spectral", serif',70],['Cao Bằng','italic 500 32px "Spectral", serif',50],['28 · 01 · 1941','500 26px "JetBrains Mono", monospace',40]],bg:'#cfd8c8',border:'#3d5a48',top:150,typed:6})
+};
+regExhibit('yeusach',[vitrine(-16.5,-2,F2,[{tex:docs.yeusach,w:0.5,h:0.68}])], P(-16.5,F2+2.2,-2));
+regExhibit('tours',[vitrine(-13,-2,F2,[{tex:docs.tours,w:0.5,h:0.68}])], P(-13,F2+2.2,-2));
+regExhibit('banan',[vitrine(-9.5,-2,F2,[{tex:docs.banan,w:0.5,h:0.68}])], P(-9.5,F2+2.2,-2));
+regExhibit('duongkachmenh',[vitrine(-13,3,F2,[{tex:docs.dkm,w:0.5,h:0.68}])], P(-13,F2+2.2,3));
+regExhibit('pacbo',[vitrine(13,1,F2,[{tex:docs.pacbo,w:0.5,h:0.68}])], P(13,F2+2.2,1));
+regExhibit('denthonambo',[panel({w:5.5,h:3.2,pos:P(6.24,F2+2.3,-2.8),rotY:Math.PI/2,eyebrow:'Tầng 2 · Chuyên đề',year:'Từ 1970',title:'Đền thờ Bác Hồ ở Nam Bộ',
+  lines:['Những ngôi đền do nhân dân Nam Bộ dựng để tưởng nhớ Người, có nơi khởi dựng ngay trong chiến tranh như đền thờ ở Long Đức, Trà Vinh (1970).'],textSize:34,bg:'#efe2c4'})], P(6.9,F2+4.2,-2.8));
+regExhibit('museum',[panel({w:3.6,h:2.4,pos:P(0,F2+2.5,-6.76),eyebrow:'Bảo tàng Hồ Chí Minh – chi nhánh TP.HCM',year:'1979 · 1995',title:'Từ khu lưu niệm đến bảo tàng',lines:['02/09/1979 mở cửa đón khách. Tháng 10/1995 đổi tên thành bảo tàng.'],textSize:32})], P(0,F2+4.0,-6.2));
+regExhibit('chuyende',[panel({w:4,h:2.8,pos:P(-5.76,F2+2.3,-2.5),rotY:Math.PI/2,eyebrow:'Sơ đồ trưng bày',title:'Các phòng hai tầng',
+  lines:['Tầng 1 · Tưởng niệm · Cuộc hành trình của thời đại · Bác Hồ với miền Nam · Sài Gòn những năm 1910 · Những Tuyên ngôn độc lập · Xe Peugeot','Tầng 2 · Đền thờ Bác ở Nam Bộ · 4 phòng chuyên đề · Đời thường · Học tập suốt đời'],textSize:28})], P(-5.2,F2+4.0,-2.5));
+regExhibit('truss',[trussGroup], P(0,EAVE+1.5,5.5));
+
+// wharf sign + bollards
+{
+  const g=new T.Group(); scene.add(g);
+  const post=new T.Mesh(new T.CylinderGeometry(0.06,0.06,2.4,8),M.iron); post.position.set(8,1.2,-53.2); g.add(post);
+  const p=panel({w:1.8,h:1.1,pos:P(8,2.2,-53.12),eyebrow:'Bến tàu · 1899',title:'Cầu tàu Nhà Rồng',titleSize:84,lines:['Neo cách nhau 18 m · cầu rộng 8 m'],textSize:40}); g.add(p);
+  addCollider(7.9,0,-53.3,8.1,2.8,-53.1);
+  regExhibit('wharf',[g,...bollards], P(8,3.4,-53.2));
+}
+standBoard(-16,-48.4,'ship_river',{rotY:Math.PI,w:2.4,h:1.5,eyebrow:'Nơi tàu rời bến',year:'5 · 6 · 1911',title:'Amiral Latouche-Tréville',lines:['Nguyễn Tất Thành (Văn Ba) làm phụ bếp trên tàu, rời Bến Nhà Rồng sang Pháp.'],textSize:34,titleSize:64});
+
+
+/* ---------- ground-floor hall: memorial, independence declarations, the South ---------- */
+{
+  const g=new T.Group(); g.position.set(0,G0,-3.9); scene.add(g);
+  const add=(geo,mat,x,y,z,ry)=>{ const m=new T.Mesh(geo,mat); m.position.set(x,y,z); if(ry) m.rotation.y=ry; m.castShadow=true; m.receiveShadow=true; g.add(m); return m; };
+  add(new T.BoxGeometry(4.4,3.4,0.12),std({color:0x8e1f1a,roughness:.8}),0,1.7,-0.75);
+  const banner=new T.Mesh(new T.PlaneGeometry(3.6,0.7),std({map:drawPanel({w:3.6,h:0.7,title:'PHÒNG TƯỞNG NIỆM',titleSize:84,bg:'#8e1f1a',bg2:'#7a1914',ink:'#f0d27a',ink2:'#d6a644'}),roughness:.8}));
+  banner.position.set(0,2.9,-0.68); g.add(banner);
+  add(new T.BoxGeometry(3.2,0.95,1.0),M.woodDark,0,0.475,0);
+  add(new T.BoxGeometry(3.3,0.04,1.1),std({color:0xb0261d,roughness:.9}),0,0.97,0);
+  add(new T.BoxGeometry(1.6,0.6,0.5),M.woodDark,0,1.3,-0.2);
+  add(new T.CylinderGeometry(0.16,0.12,0.18,16),M.gold,0,1.08,0.25);
+  for(const s of [-1,1]){
+    add(new T.CylinderGeometry(0.1,0.16,0.5,12),M.white,1.15*s,1.24,0.05);
+    for(let i=0;i<7;i++){ const f=add(new T.SphereGeometry(0.09,8,6),std({color:i%2?0xf3e6c0:0xd8452f,roughness:.7}),1.15*s+Math.cos(i)*0.14,1.58+Math.sin(i*1.7)*0.08,0.05+Math.sin(i)*0.14); f.castShadow=false; }
+  }
+  for(const x of [-0.18,0,0.18]){ const st=add(new T.CylinderGeometry(0.006,0.006,0.32,4),std({color:0x8a3b22}),x,1.3,0.25); st.castShadow=false; }
+  addCollider(-2.2,G0,-4.8,2.2,G0+3.4,-3.4);
+  regExhibit('memorial',[g], P(0,G0+4.0,-3.6));
+}
+regExhibit('tuyenngon',[panel({w:4.6,h:3.0,pos:P(5.76,G0+2.4,-2.2),rotY:-Math.PI/2,eyebrow:'Chuyên đề',year:'XI · 1428 · 1945',yearSize:72,title:'Việt Nam – những Tuyên ngôn độc lập',titleSize:52,
+  lines:['Nam quốc sơn hà · Bình Ngô đại cáo · Tuyên ngôn Độc lập 2/9/1945','“Tất cả mọi người đều sinh ra có quyền bình đẳng…”'],textSize:30,bg:'#efe2c4'})], P(5.2,G0+4.2,-2.2));
+regExhibit('miennam',[panel({w:4.6,h:3.0,pos:P(-5.76,G0+2.4,-2.2),rotY:Math.PI/2,eyebrow:'Chuyên đề',title:'Bác Hồ với miền Nam, miền Nam với Bác Hồ',titleSize:54,
+  lines:['“Miền Nam luôn trong trái tim tôi.”','Kèm triển lãm “Đi qua cuộc chiến”.'],textSize:32})], P(-5.2,G0+4.2,-2.2));
+
+/* ---------- Peugeot display (right room, ground) – generic sedan, no brand marks ---------- */
+{
+  const g=new T.Group(); g.position.set(14,G0,3.4); scene.add(g);
+  const body=std({color:0x1f2a2e,roughness:.25,metalness:.55}), chrome=std({color:0xd9dcdc,roughness:.15,metalness:.95}), glass=std({color:0x2a3a40,roughness:.05,metalness:.4,transparent:true,opacity:.65});
+  const add=(geo,mat,x,y,z)=>{ const m=new T.Mesh(geo,mat); m.position.set(x,y,z); m.castShadow=true; g.add(m); return m; };
+  const plinth=add(new T.BoxGeometry(5.4,0.15,2.6),M.stone,0,0.075,0);
+  const lower=new T.BoxGeometry(4.4,0.62,1.66,8,1,1); { const q=lower.attributes.position; for(let i=0;i<q.count;i++){ const x=q.getX(i), y=q.getY(i); const t=Math.abs(x)/2.2; if(y>0) q.setY(i,y-0.08*t*t); q.setZ(i,q.getZ(i)*(1-0.06*t*t)); } lower.computeVertexNormals(); }
+  add(lower,body,0,0.72,0);
+  const cab=new T.BoxGeometry(2.2,0.55,1.46,4,1,1); { const q=cab.attributes.position; for(let i=0;i<q.count;i++){ if(q.getY(i)>0){ q.setX(i,q.getX(i)*0.78); q.setZ(i,q.getZ(i)*0.9); } } cab.computeVertexNormals(); }
+  add(cab,body,-0.25,1.3,0);
+  const win=new T.BoxGeometry(2.0,0.4,1.48,4,1,1); { const q=win.attributes.position; for(let i=0;i<q.count;i++){ if(q.getY(i)>0){ q.setX(i,q.getX(i)*0.78); q.setZ(i,q.getZ(i)*0.9); } } }
+  add(win,glass,-0.25,1.3,0);
+  for(const sx of [-1,1]){ add(new T.BoxGeometry(0.08,0.14,1.7),chrome,2.22*sx,0.52,0); add(new T.CylinderGeometry(0.11,0.11,0.06,14),chrome,2.2*sx,0.8,0.55).rotation.z=Math.PI/2; add(new T.CylinderGeometry(0.11,0.11,0.06,14),chrome,2.2*sx,0.8,-0.55).rotation.z=Math.PI/2; }
+  for(const sx of [-1.35,1.4]) for(const sz of [-0.78,0.78]){ const w=add(new T.CylinderGeometry(0.33,0.33,0.22,18),M.black,sx,0.48,sz); w.rotation.x=Math.PI/2; const h=add(new T.CylinderGeometry(0.16,0.16,0.24,14),chrome,sx,0.48,sz); h.rotation.x=Math.PI/2; }
+  for(const [x,z] of [[-2.7,-1.3],[2.7,-1.3],[-2.7,1.3],[2.7,1.3]]) add(new T.CylinderGeometry(0.04,0.06,0.9,8),M.gold,x,0.6,z);
+  for(const z of [-1.3,1.3]){ const r=add(new T.CylinderGeometry(0.02,0.02,5.4,6),std({color:0x8e1f1a}),0,0.95,z); r.rotation.z=Math.PI/2; }
+  const sign=new T.Mesh(new T.PlaneGeometry(1.4,0.45),std({map:drawPanel({w:1.4,h:0.45,title:'Xe ô tô hiệu Peugeot',titleSize:90}),roughness:.8})); sign.position.set(0,0.6,1.33); g.add(sign);
+  addCollider(14-2.75,G0,3.4-1.35,14+2.75,G0+1.7,3.4+1.35);
+  regExhibit('peugeot',[g], P(14,G0+2.6,3.4));
+}
+
+/* ---------- statue in front of the building (stand-in figure, not a likeness) ---------- */
+{
+  const g=new T.Group(); g.position.set(0,0,-28); g.rotation.y=Math.PI; scene.add(g); // faces the Sài Gòn River
+  const granite=std({color:0x5b2a22,roughness:.3,metalness:.1}), granite2=std({color:0x7a3a2c,roughness:.45});
+  const paveTex=TX.stone.clone(); paveTex.needsUpdate=true; paveTex.repeat.set(4,4);
+  const pave=new T.Mesh(new T.BoxGeometry(14,0.03,14),std({map:paveTex,color:0xd98a78,roughness:.4})); pave.position.y=0.045; pave.receiveShadow=true; g.add(pave);
+  const add=(geo,mat,x,y,z)=>{ const m=new T.Mesh(geo,mat); m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; g.add(m); return m; };
+  [[4.0,0.11],[3.4,0.33],[2.8,0.55]].forEach(([r,y])=>add(new T.CylinderGeometry(r,r,0.22,40),granite2,0,y,0));
+  add(new T.BoxGeometry(1.9,0.3,1.9),granite,0,0.81,0);
+  add(new T.BoxGeometry(1.5,2.9,1.5),granite,0,2.41,0);
+  add(new T.BoxGeometry(1.8,0.28,1.8),granite,0,3.98,0);
+  const pl=add(new T.BoxGeometry(0.9,0.5,0.02),M.gold,0,2.6,0.76); pl.castShadow=false;
+  const bronze=std({color:0xc89b3c,roughness:.3,metalness:.85});
+  const fig=new T.Group(); fig.position.set(0,4.12,0); fig.scale.setScalar(1.95); g.add(fig);
+  const f=(geo,x,y,z,rx,rz)=>{ const m=new T.Mesh(geo,bronze); m.position.set(x,y,z); m.rotation.set(rx||0,0,rz||0); m.castShadow=true; fig.add(m); return m; };
+  f(new T.CylinderGeometry(0.085,0.075,0.9,10),-0.1,0.47,0); f(new T.CylinderGeometry(0.085,0.075,0.9,10),0.1,0.47,0.02);
+  f(new T.BoxGeometry(0.12,0.07,0.26),-0.1,0.035,0.04); f(new T.BoxGeometry(0.12,0.07,0.26),0.1,0.035,0.06);
+  f(new T.LatheGeometry([[0.0,0.5],[0.27,0.5],[0.24,0.8],[0.2,1.0],[0.24,1.28],[0.27,1.4],[0.14,1.5],[0,1.52]].map(p=>new T.Vector2(p[0],p[1])),18),0,0,0);
+  f(new T.CylinderGeometry(0.06,0.05,0.62,8),-0.3,1.12,0,0,0.1); f(new T.CylinderGeometry(0.06,0.05,0.62,8),0.3,1.12,0,0,-0.1);
+  f(new T.SphereGeometry(0.06,8,6),-0.33,0.8,0.02); f(new T.SphereGeometry(0.06,8,6),0.33,0.8,0.02);
+  f(new T.CylinderGeometry(0.05,0.055,0.1,8),0,1.55,0);
+  const head=f(new T.SphereGeometry(0.115,14,12),0,1.68,0.01); head.scale.set(0.92,1.12,1);
+  addCollider(-4,0,-32,4,0.22,-24); addCollider(-3.4,0,-31.4,3.4,0.44,-24.6); addCollider(-2.8,0,-30.8,2.8,0.66,-25.2);
+  addCollider(-0.95,0,-28.95,0.95,7.6,-27.05);
+  regExhibit('statue',[g], P(0,8.8,-28));
+}
+
+/* ---------- blue-and-white porcelain pots with clipped bonsai along the plaza (instanced) ---------- */
+{
+  const pots=[];
+  for(const x of [-13,-9,9,13]) for(let z=-14.5;z>=-42;z-=5.4) pots.push([x,z]);
+  pots.push([-5.6,-13.2],[5.6,-13.2],[-6.6,-28],[6.6,-28],[-4.5,-36],[4.5,-36]);
+  const [c,x]=cnv(512,256); x.fillStyle='#f4f6f6'; x.fillRect(0,0,512,256);
+  x.fillStyle='#1f4f9a'; x.fillRect(0,18,512,10); x.fillRect(0,214,512,10); x.fillRect(0,40,512,4); x.fillRect(0,196,512,4);
+  for(let i=0;i<14;i++){ const cx=18+i*37, cy=120; x.strokeStyle='#2457a8'; x.lineWidth=5; x.beginPath(); x.arc(cx,cy,16,0,6); x.stroke(); x.beginPath(); x.moveTo(cx-18,cy+40); x.quadraticCurveTo(cx,cy+10,cx+18,cy+40); x.stroke(); x.fillStyle='#2457a8'; x.beginPath(); x.arc(cx,cy,6,0,7); x.fill(); x.beginPath(); x.ellipse(cx+12,cy-36,9,4,0.6,0,7); x.fill(); }
+  const potMat=std({map:tex(c,false),roughness:.25,metalness:.05});
+  const potGeo=new T.LatheGeometry([[0,0.02],[0.36,0],[0.48,0.12],[0.66,0.46],[0.62,0.8],[0.5,0.92],[0.56,0.98],[0.5,1.0],[0,0.96]].map(p=>new T.Vector2(p[0],p[1])),24);
+  const n=pots.length;
+  const pm=new T.InstancedMesh(potGeo,potMat,n), tm=new T.InstancedMesh(new T.CylinderGeometry(0.07,0.11,1,6),M.woodDark,n), lm=new T.InstancedMesh(new T.SphereGeometry(1,10,7),std({color:0x2f5a2a,roughness:.9,flatShading:true}),n*4);
+  const q=new T.Quaternion(), m4=new T.Matrix4();
+  pots.forEach(([px,pz],i)=>{
+    m4.compose(new V3(px,0.03,pz),q,new V3(1,1,1)); pm.setMatrixAt(i,m4);
+    m4.compose(new V3(px,1.6,pz),q,new V3(1,1.4,1)); tm.setMatrixAt(i,m4);
+    [[0.78,1.55],[0.62,2.05],[0.46,2.48],[0.28,2.82]].forEach(([r,y],k)=>{ m4.compose(new V3(px+(k%2?0.08:-0.06),y,pz),q,new V3(r,r*0.42,r)); lm.setMatrixAt(i*4+k,m4); });
+    addCollider(px-0.66,0,pz-0.66,px+0.66,1.0,pz+0.66);
+  });
+  for(const m of [pm,tm,lm]){ m.castShadow=true; m.receiveShadow=true; scene.add(m); }
+}
+
+/* ---------- forecourt: fountain + entrance gate ---------- */
+const fountainJets=[];
+{
+  const g=new T.Group(); g.position.set(0,0,24); scene.add(g);
+  const ring=new T.Mesh(new T.CylinderGeometry(3.6,3.7,0.6,40,1,true),M.stone); ring.position.y=0.3; g.add(ring);
+  const lip=new T.Mesh(new T.TorusGeometry(3.65,0.16,8,48),M.stone); lip.rotation.x=Math.PI/2; lip.position.y=0.6; g.add(lip);
+  const pool=new T.Mesh(new T.CircleGeometry(3.6,40),std({color:0x3f7f86,roughness:.1,metalness:.2})); pool.rotation.x=-Math.PI/2; pool.position.y=0.45; g.add(pool);
+  const col=new T.Mesh(new T.CylinderGeometry(0.25,0.4,1.6,12),M.stone); col.position.y=0.8; g.add(col);
+  const bowl=new T.Mesh(new T.CylinderGeometry(1.2,0.5,0.35,24),M.stone); bowl.position.y=1.7; g.add(bowl);
+  g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
+  const N=420, pos=new Float32Array(N*3), seeds=[];
+  for(let i=0;i<N;i++){ seeds.push({a:Math.random()*Math.PI*2, t:Math.random(), c:i%3===0}); }
+  const geo=new T.BufferGeometry(); geo.setAttribute('position',new T.BufferAttribute(pos,3));
+  const pts=new T.Points(geo,new T.PointsMaterial({color:0xd8f0f2,size:0.09,transparent:true,opacity:.8,depthWrite:false})); g.add(pts);
+  fountainJets.push({geo,pos,seeds});
+  addCollider(-3.8,0,20.2,3.8,0.75,27.8);
+}
+function updateFountain(dt){
+  for(const j of fountainJets){ const p=j.pos;
+    j.seeds.forEach((s,i)=>{ s.t+=dt*0.7; if(s.t>1) s.t-=1; const t=s.t;
+      if(s.c){ const h=1.9+4.2*t-5.2*t*t; p[i*3]=Math.cos(s.a)*0.15*t; p[i*3+1]=Math.max(0.45,h); p[i*3+2]=Math.sin(s.a)*0.15*t; }
+      else { const r=1.2+1.6*t; p[i*3]=Math.cos(s.a)*r; p[i*3+1]=Math.max(0.45,1.85+1.0*t-3.2*t*t); p[i*3+2]=Math.sin(s.a)*r; } });
+    j.geo.attributes.position.needsUpdate=true; }
+}
+{
+  for(const s of [-1,1]){
+    boxMM(4.2*s-0.6,0,46.4,4.2*s+0.6,4.2,47.6,M.plaster);
+    boxMM(4.2*s-0.75,4.2,46.25,4.2*s+0.75,4.5,47.75,M.trim,{collide:false});
+    const lamp=new T.Mesh(new T.SphereGeometry(0.28,12,10),new T.MeshBasicMaterial({color:0xfff1d0})); lamp.position.set(4.2*s,4.85,47); scene.add(lamp);
+    boxMM(s<0?-24:4.8, 0, 46.85, s<0?-4.8:24, 0.5, 47.15, M.plaster);
+    for(let x=(s<0?-23.7:5.1); x<(s<0?-4.8:24); x+=0.3) cyl(0.02,0.02,1.4,M.iron,x,1.2,47,{seg:4,cast:false});
+    boxMM(s<0?-24:4.8,1.85,46.95,s<0?-4.8:24,1.95,47.05,M.iron,{occlude:false});
+    addCollider(s<0?-24:4.8,0,46.85,s<0?-4.8:24,2,47.15);
+  }
+  const sign=new T.Mesh(new T.PlaneGeometry(7.2,0.9),std({map:drawPanel({w:7.2,h:0.9,title:'BẢO TÀNG HỒ CHÍ MINH – CHI NHÁNH TP. HỒ CHÍ MINH',titleSize:44,bg:'#8e1f1a',bg2:'#7a1914',ink:'#f0d27a',ink2:'#d6a644'}),roughness:.7,side:T.DoubleSide}));
+  sign.position.set(0,4.0,47); scene.add(sign);
+  boxMM(-3.6,4.45,46.9,3.6,4.6,47.1,M.iron,{collide:false});
+}
+
+/* ================= INTERIOR DRESSING (from the gallery photo) ================= */
+const cream=std({color:0xf3ead6,roughness:.9}), yellowW=std({color:0xf0cf5e,roughness:.9}), redFrame=std({color:0xa8261c,roughness:.5}), redCloth=std({color:0xb3261d,roughness:.95}), straw=std({color:0xb99a5c,roughness:.95});
+function sepiaPhoto(x,X,Y,W,H,kind){ // placeholder photo (no real images): sepia tones + simple shapes
+  const g=x.createLinearGradient(X,Y,X,Y+H); g.addColorStop(0,'#b9a587'); g.addColorStop(1,'#6e5a44'); x.fillStyle=g; x.fillRect(X,Y,W,H);
+  x.fillStyle='rgba(40,30,20,.35)';
+  if(kind==='portrait'){ x.beginPath(); x.ellipse(X+W/2,Y+H*0.42,W*0.2,H*0.22,0,0,7); x.fill(); x.fillRect(X+W*0.22,Y+H*0.66,W*0.56,H*0.34); }
+  else if(kind==='house'){ x.fillRect(X+W*0.15,Y+H*0.5,W*0.7,H*0.35); x.beginPath(); x.moveTo(X+W*0.08,Y+H*0.52); x.lineTo(X+W*0.5,Y+H*0.18); x.lineTo(X+W*0.92,Y+H*0.52); x.fill(); }
+  else if(kind==='doc'){ x.fillStyle='#efe8d8'; x.fillRect(X,Y,W,H); x.fillStyle='rgba(60,50,40,.55)'; for(let yy=Y+H*0.15;yy<Y+H*0.9;yy+=H*0.09) x.fillRect(X+W*0.12,yy,W*0.76*(0.6+Math.random()*0.4),2); }
+  else { for(let i=0;i<5;i++){ x.fillRect(X+Math.random()*W*0.7,Y+H*0.45+Math.random()*H*0.3,W*0.12,H*0.25); } }
+}
+function frameGrid(x,X,Y,cols,rows,cw,ch,gap,kinds,frame){
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){ const px=X+c*(cw+gap), py=Y+r*(ch+gap);
+    x.fillStyle=frame||'#a8261c'; x.fillRect(px-5,py-5,cw+10,ch+10); x.fillStyle='#f5efe2'; x.fillRect(px-1,py-1,cw+2,ch+2);
+    sepiaPhoto(x,px+4,py+4,cw-8,ch-8,kinds[(r*cols+c)%kinds.length]); }
+}
+function floorArrow(x,y,z,dir){
+  const g=new T.Group(); g.position.set(x,y+0.012,z); g.rotation.y=dir||0; scene.add(g);
+  const d=new T.Mesh(new T.CircleGeometry(0.32,24),std({color:0xc9302a,roughness:.5})); d.rotation.x=-Math.PI/2; g.add(d);
+  const sh=new T.Shape(); sh.moveTo(-0.16,-0.04); sh.lineTo(0,-0.16); sh.lineTo(0.16,-0.04); sh.lineTo(0.16,0.04); sh.lineTo(0,-0.08); sh.lineTo(-0.16,0.04); sh.closePath();
+  const a=new T.Mesh(new T.ShapeGeometry(sh),std({color:0xf4f0e8})); a.rotation.x=-Math.PI/2; a.position.y=0.003; g.add(a);
+}
+function photoBoard(x,y,z,rotY,w,h,title,kinds){
+  const W=1024, H=Math.round(1024*h/w); const [c,cx]=cnv(W,H);
+  cx.fillStyle='#f6f1e4'; cx.fillRect(0,0,W,H); cx.fillStyle='#9e2a1f'; cx.font='700 54px "Spectral", serif'; cx.fillText(title,48,90);
+  const cols=5, cw=150, ch=Math.min(120,(H-200)/2.4|0); frameGrid(cx,52,140,cols,Math.max(1,Math.floor((H-170)/(ch+34))),cw,ch,34,kinds||['photo','portrait','doc','house']);
+  const grp=new T.Group(); grp.position.set(x,y,z); grp.rotation.y=rotY; scene.add(grp);
+  const back=new T.Mesh(new T.BoxGeometry(w+0.12,h+0.12,0.12),cream); grp.add(back);
+  const face=new T.Mesh(new T.PlaneGeometry(w,h),std({map:tex(c,false),roughness:.85})); face.position.z=0.065; grp.add(face);
+  return grp;
+}
+function tv(x,y,z,rotY){ const g=new T.Group(); g.position.set(x,y,z); g.rotation.y=rotY||0; scene.add(g);
+  const b=new T.Mesh(new T.BoxGeometry(1.4,0.82,0.08),M.black); g.add(b); const s=new T.Mesh(new T.PlaneGeometry(1.3,0.72),std({color:0x23303a,roughness:.15,metalness:.4})); s.position.z=0.045; g.add(s); }
+function boxFan(x,y,z,rotY){ const g=new T.Group(); g.position.set(x,y,z); g.rotation.y=rotY||0; scene.add(g);
+  const c=std({color:0xeee6c4,roughness:.6}); const base=new T.Mesh(new T.BoxGeometry(0.6,0.1,0.35),c); base.position.y=0.05; g.add(base);
+  const body=new T.Mesh(new T.BoxGeometry(0.62,0.62,0.18),c); body.position.y=0.42; g.add(body);
+  const gr=new T.Mesh(new T.CircleGeometry(0.26,24),std({color:0x8f8a76,roughness:.5})); gr.position.set(0,0.42,0.095); g.add(gr);
+  for(let i=0;i<5;i++){ const r=new T.Mesh(new T.TorusGeometry(0.05+i*0.05,0.008,4,24),c); r.position.set(0,0.42,0.1); g.add(r); }
+  addCollider(x-0.35,y,z-0.35,x+0.35,y+0.75,z+0.35); }
+
+/* ---- upstairs left room: corner rebuilt after the photo ---- */
+{
+  const Y=F2, qh=new T.Group(); scene.add(qh);
+  // false walls in front of the windows (as in the real gallery)
+  boxMM(-17.05,Y,-6.62,-13.3,Y+4.3,-6.45,cream); boxMM(-13.3,Y,-6.62,-6.6,Y+4.3,-6.45,yellowW); boxMM(-19.62,Y,-4.05,-19.45,Y+4.3,6.4,cream);
+  // curved diorama: sky + countryside painting with a grid of framed photos and documents
+  const W=1024,H=1000; const [c,x]=cnv(W,H);
+  let g=x.createLinearGradient(0,0,0,H*0.55); g.addColorStop(0,'#3f86c8'); g.addColorStop(1,'#d9ecf5'); x.fillStyle=g; x.fillRect(0,0,W,H);
+  for(let i=0;i<14;i++){ x.fillStyle='rgba(255,255,255,.75)'; x.beginPath(); x.ellipse(Math.random()*W,60+Math.random()*260,60+Math.random()*90,18+Math.random()*20,0,0,7); x.fill(); }
+  for(let i=0;i<260;i++){ x.fillStyle=`hsl(${95+Math.random()*40},${40+Math.random()*25}%,${22+Math.random()*28}%)`; x.beginPath(); x.arc(Math.random()*W,H*0.42+Math.random()*H*0.58,14+Math.random()*40,0,7); x.fill(); }
+  frameGrid(x,190,170,6,1,88,110,26,['portrait']); frameGrid(x,190,330,6,3,88,110,26,['doc','doc','house','doc','photo','doc']);
+  const dio=new T.Mesh(new T.CylinderGeometry(2.4,2.4,3.7,32,1,true,Math.PI,Math.PI/2),std({map:tex(c,false),side:T.DoubleSide,roughness:.8}));
+  dio.position.set(-17.05,Y+2.15,-4.05); qh.add(dio);
+  const kick=new T.Mesh(new T.CylinderGeometry(2.42,2.42,0.3,32,1,true,Math.PI,Math.PI/2),std({color:0xf4efe6,side:T.DoubleSide})); kick.position.set(-17.05,Y+0.15,-4.05); qh.add(kick);
+  // glass case in the curve: spinning wheel + straw broom
+  const cs=new T.Group(); cs.position.set(-17.9,Y,-4.9); cs.rotation.y=Math.PI/4; qh.add(cs);
+  const add=(p,geo,mat,x0,y0,z0)=>{ const m=new T.Mesh(geo,mat); m.position.set(x0,y0,z0); m.castShadow=true; p.add(m); return m; };
+  add(cs,new T.BoxGeometry(2.2,0.32,1.0),cream,0,0.16,0); add(cs,new T.BoxGeometry(2.1,0.02,0.92),redCloth,0,0.33,0);
+  add(cs,new T.TorusGeometry(0.38,0.025,6,28),M.woodDark,-0.45,0.85,0);
+  for(let i=0;i<8;i++){ const s=add(cs,new T.BoxGeometry(0.02,0.74,0.02),M.woodDark,-0.45,0.85,0); s.rotation.z=i*Math.PI/8; }
+  add(cs,new T.BoxGeometry(0.06,0.55,0.06),M.woodDark,-0.45,0.6,0.12); add(cs,new T.BoxGeometry(1.2,0.06,0.3),M.woodDark,-0.1,0.38,0); add(cs,new T.BoxGeometry(0.05,0.3,0.05),M.woodDark,0.35,0.52,0);
+  add(cs,new T.ConeGeometry(0.2,1.5,12,1,true),straw,0.65,1.1,0); add(cs,new T.CylinderGeometry(0.035,0.035,0.4,6),M.woodDark,0.65,2.0,0);
+  add(cs,new T.BoxGeometry(2.2,1.9,1.0),M.vitrine,0,1.3,0).castShadow=false;
+  addCollider(-19.0,Y,-6.0,-16.8,Y+2.3,-3.8);
+  // white wall: label, red-framed painting, recessed niche with a model thatched house
+  const lab=new T.Mesh(new T.PlaneGeometry(2.0,0.5),std({map:drawPanel({w:2.0,h:0.5,title:'Quê hương – thời niên thiếu',titleSize:72,bg:'#f8f8f6',bg2:'#eef0f2',ink:'#1f4f9a',ink2:'#7aa0d6'}),roughness:.8}));
+  lab.position.set(-15.2,Y+3.75,-6.43); qh.add(lab);
+  const [pc,px]=cnv(512,380); px.fillStyle='#d9c39b'; px.fillRect(0,0,512,380); px.fillStyle='#8a6a45'; px.fillRect(0,250,512,130); px.fillStyle='#5a4632'; px.fillRect(60,120,30,140); px.fillRect(420,120,30,140); px.fillStyle='#3d3027';
+  for(const [ax,ay] of [[200,150],[300,140]]){ px.beginPath(); px.arc(ax,ay,22,0,7); px.fill(); px.fillRect(ax-28,ay+22,56,110); }
+  px.fillStyle='#6d4c2e'; px.fillRect(150,240,220,20);
+  add(qh,new T.BoxGeometry(1.55,1.15,0.06),redFrame,-15.2,Y+2.75,-6.41);
+  const pnt=new T.Mesh(new T.PlaneGeometry(1.35,0.97),std({map:tex(pc,false),roughness:.8})); pnt.position.set(-15.2,Y+2.75,-6.375); qh.add(pnt);
+  add(qh,new T.BoxGeometry(2.3,1.1,0.55),cream,-15.2,Y+0.55,-6.18);
+  add(qh,new T.BoxGeometry(2.0,0.9,0.5),cream,-15.2,Y+1.55,-6.2);
+  add(qh,new T.BoxGeometry(1.8,0.7,0.02),std({color:0xd8cdb4}),-15.2,Y+1.55,-6.42);
+  const hs=new T.Group(); hs.position.set(-15.2,Y+1.22,-6.2); qh.add(hs);
+  add(hs,new T.BoxGeometry(1.1,0.06,0.42),std({color:0x8a6a45}),0,0,0); add(hs,new T.BoxGeometry(0.8,0.24,0.28),M.woodDark,0,0.15,0);
+  const rf=add(hs,new T.ConeGeometry(0.62,0.3,4,1),straw,0,0.42,0); rf.rotation.y=Math.PI/4; rf.scale.set(1,1,0.55);
+  add(qh,new T.BoxGeometry(1.84,0.74,0.02),M.vitrine,-15.2,Y+1.55,-5.94).castShadow=false;
+  addCollider(-16.4,Y,-6.45,-14.0,Y+2.0,-5.9);
+  // yellow wall: TV, three red-framed photos, map of places visited, slanted document case, box fan
+  tv(-11.9,Y+3.6,-6.4,0);
+  for(const [i,k] of [[0,'house'],[1,'house'],[2,'house']]){ const fy=Y+2.75-i*0.75;
+    add(qh,new T.BoxGeometry(0.78,0.58,0.05),redFrame,-12.3,fy,-6.41);
+    const [ic,ix]=cnv(256,190); sepiaPhoto(ix,0,0,256,190,k); const ph=new T.Mesh(new T.PlaneGeometry(0.66,0.46),std({map:tex(ic,false)})); ph.position.set(-12.3,fy,-6.38); qh.add(ph); }
+  const [mc,mx2]=cnv(512,700); mx2.fillStyle='#bfe0ee'; mx2.fillRect(0,0,512,700); mx2.fillStyle='#1d4f8f'; mx2.font='700 30px "Be Vietnam Pro", sans-serif'; mx2.fillText('Những nơi Bác đã đến',24,48); mx2.font='500 22px "Be Vietnam Pro", sans-serif'; mx2.fillText('từ 1890 đến 1911',24,80);
+  mx2.fillStyle='#f6d34a'; mx2.strokeStyle='#8a7a3a'; mx2.lineWidth=2; mx2.beginPath();
+  [[250,110],[300,120],[320,170],[290,200],[300,250],[330,300],[350,360],[360,420],[340,470],[300,520],[260,560],[220,600],[200,640],[230,660],[270,630],[310,590],[350,540],[380,480],[390,400],[370,330],[340,260],[330,200],[350,150],[310,110]].forEach(([a,b],i)=>i?mx2.lineTo(a,b):mx2.moveTo(a,b)); mx2.closePath(); mx2.fill(); mx2.stroke();
+  for(const [a,b] of [[300,250],[320,300],[330,420],[280,560],[230,640]]){ mx2.fillStyle='#c9302a'; mx2.beginPath(); mx2.arc(a,b,7,0,7); mx2.fill(); }
+  const mp=new T.Mesh(new T.PlaneGeometry(1.6,2.2),std({map:tex(mc,false),roughness:.8})); mp.position.set(-10.3,Y+2.4,-6.43); qh.add(mp);
+  const slant=new T.Group(); slant.position.set(-10.6,Y+0.95,-6.15); slant.rotation.x=0.45; qh.add(slant);
+  add(slant,new T.BoxGeometry(2.0,0.1,0.6),std({color:0xf3efe6}),0,0,0); add(slant,new T.BoxGeometry(1.9,0.02,0.5),redCloth,0,0.06,0);
+  for(let i=0;i<3;i++){ const [dc,dx]=cnv(128,170); sepiaPhoto(dx,0,0,128,170,'doc'); const d=new T.Mesh(new T.PlaneGeometry(0.34,0.42),std({map:tex(dc,false)})); d.rotation.x=-Math.PI/2; d.position.set(-0.6+i*0.6,0.075,0); slant.add(d); }
+  add(slant,new T.BoxGeometry(2.0,0.04,0.6),M.vitrine,0,0.12,0).castShadow=false;
+  for(const s of [-1,1]) add(qh,new T.BoxGeometry(0.05,0.95,0.05),M.iron,-10.6+s*0.9,Y+0.47,-6.2);
+  addCollider(-11.7,Y,-6.45,-9.5,Y+1.2,-5.8);
+  boxFan(-8.4,Y,-5.9,-0.3);
+  // end wall: big rounded collage panel + small portrait row
+  const [cc,cx2]=cnv(800,860); cx2.fillStyle='#e8eef0'; cx2.fillRect(0,0,800,860);
+  for(let i=0;i<40;i++){ const w=60+Math.random()*160, h=40+Math.random()*110; sepiaPhoto(cx2,Math.random()*(800-w),Math.random()*500,w,h,['photo','house','photo'][i%3]); }
+  cx2.fillStyle='rgba(120,170,140,.55)'; cx2.fillRect(0,40,800,90); frameGrid(cx2,90,560,6,2,90,100,22,['portrait'],'#2c2c2c');
+  const col=new T.Mesh(new T.PlaneGeometry(3.0,3.3),std({map:tex(cc,false),roughness:.85})); col.rotation.y=Math.PI/2; col.position.set(-19.43,Y+2.05,-0.6); qh.add(col);
+  floorArrow(-15.2,Y,-3.2,0); floorArrow(-12,Y,0.5,Math.PI/2);
+  regExhibit('quehuong',[qh], P(-17.2,Y+4.25,-4.4));
+}
+
+/* ---- photo boards, TVs, fans and floor arrows in the other rooms ---- */
+photoBoard(-19.35,G0+2.0,0.8,Math.PI/2,3.6,2.6,'Sài Gòn những năm 1910',['photo','house','doc']);
+photoBoard(19.35,G0+2.0,-1.6,-Math.PI/2,3.6,2.6,'Cuộc hành trình của thời đại',['photo','portrait','doc']);
+photoBoard(19.35,F2+2.0,3.6,-Math.PI/2,3.6,2.6,'Đền thờ Bác Hồ ở Nam Bộ',['house','photo','doc']);
+photoBoard(-19.35,F2+2.0,4.6,Math.PI/2,2.6,2.4,'Tư liệu, hình ảnh',['doc','portrait','photo']);
+tv(19.6,G0+3.9,-1.6,-Math.PI/2); tv(19.6,F2+3.9,3.6,-Math.PI/2);
+boxFan(-18.8,G0,5.6,Math.PI*0.7); boxFan(18.8,F2,-5.8,-Math.PI*0.3);
+floorArrow(0,G0,5.6,0); floorArrow(-4,G0,2.2,-Math.PI/2); floorArrow(4,G0,2.2,Math.PI/2); floorArrow(-9,G0,2.2,-Math.PI/2); floorArrow(9,G0,2.2,Math.PI/2);
+floorArrow(6.5,F2,-3.8,Math.PI/2); floorArrow(-4,F2,2.2,-Math.PI/2); floorArrow(9,F2,2.2,Math.PI/2);
+
+const EX_IDS=Object.keys(exhibits);
+
+/* ================= STATE / UI ================= */
+const EYE=1.6, HALF=0.3, HEIGHT=1.75;
+const player={pos:new V3(0,1.63,-45), vel:new V3(), yaw:Math.PI, pitch:0.06, onGround:false};
+const st={started:false, locked:false, panel:null, mode:'fly', noclip:false, roofHidden:false, xray:false, target:null, mouse:new T.Vector2(), mouseIn:false, touch:false};
+const keys={};
+let visited=new Set();
+try{ const v=JSON.parse(localStorage.getItem('nharong.visited')||'[]'); if(Array.isArray(v)) v.forEach(k=>{ if(exhibits[k]) visited.add(k); }); }catch(e){}
+const saveVisited=()=>{ try{ localStorage.setItem('nharong.visited',JSON.stringify([...visited])); }catch(e){} };
+$('pTotal').textContent=EX_IDS.length;
+function refreshProgress(){ $('pCount').textContent=visited.size; for(const k of EX_IDS){ exhibits[k].marker.material.map = visited.has(k)?MK_SEEN:MK_NEW; } }
+refreshProgress();
+
+/* ray list (visible occluders + exhibits) */
+let rayList=[];
+const visibleChain=(o)=>{ for(let p=o;p;p=p.parent){ if(!p.visible) return false; } return true; };
+function rebuildRay(){
+  rayList=[];
+  for(const o of occluders){ if(!visibleChain(o)) continue; if(st.xray && (Array.isArray(o.material)? o.material.some(m=>WALL_MATS.includes(m)) : WALL_MATS.includes(o.material))) continue; rayList.push(o); }
+  for(const o of pickables){ if(visibleChain(o)) rayList.push(o); }
+}
+rebuildRay();
+
+/* toggles */
+function setPressed(id,v){ $(id).setAttribute('aria-pressed',v?'true':'false'); }
+function setMode(m){ st.mode=m; player.vel.y=0; setPressed('bWalk',m==='walk'); updateModeChip(); }
+function updateModeChip(){ $('modeTxt').textContent = (st.mode==='fly'?'Bay tự do XYZ':'Đi bộ · trọng lực') + (st.noclip?' · xuyên vật':''); }
+function toggleNoclip(){ st.noclip=!st.noclip; setPressed('bNoclip',st.noclip); updateModeChip(); }
+function toggleRoof(){ st.roofHidden=!st.roofHidden; roofGroup.visible=!st.roofHidden; for(const k of EX_IDS){ if(exhibits[k].inRoof) exhibits[k].marker.visible=!st.roofHidden; } setPressed('bRoof',st.roofHidden); rebuildRay(); }
+function toggleXray(){ st.xray=!st.xray; for(const m of WALL_MATS){ m.transparent=st.xray; m.opacity=st.xray?0.2:1; m.depthWrite=!st.xray; m.needsUpdate=true; } setPressed('bXray',st.xray); rebuildRay(); }
+$('bWalk').onclick=()=>setMode(st.mode==='fly'?'walk':'fly');
+$('bNoclip').onclick=toggleNoclip; $('bRoof').onclick=toggleRoof; $('bXray').onclick=toggleXray;
+$('bMenu').onclick=()=>openMenu();
+
+/* teleports */
+const TP=[
+  ['Sân tượng đài, nhìn mặt tiền (như ảnh)',[0,1.63,-45],[0,6.5,0]],
+  ['Tượng đài, nhìn ra sông',[0,1.63,-20],[0,4.5,-60]],
+  ['Bờ sông & cầu tàu',[18,1.63,-49],[-10,4,-65]],
+  ['Cổng vào phía đường Nguyễn Tất Thành',[0,1.63,52],[0,5,0]],
+  ['Phòng tưởng niệm · tầng 1',[0,G0+1.6,6.2],[0,G0+1.6,-3.9]],
+  ['Sài Gòn những năm 1910 · tầng 1',[-10,G0+1.6,6],[-14,G0+1.4,-3]],
+  ['Cuộc hành trình của thời đại · tầng 1',[16,G0+1.6,-1],[6,G0+2.5,-2.8]],
+  ['Xe Peugeot · tầng 1',[17.5,G0+2.2,-2.5],[14,G0+0.6,3.4]],
+  ['Sảnh tầng 2',[3,F2+1.6,5],[0,F2+2.4,-6.8]],
+  ['Quê hương – góc trưng bày · tầng 2',[-11.5,F2+1.6,0.5],[-16.5,F2+1.8,-5.6]],
+  ['Đền thờ Bác ở Nam Bộ · tầng 2',[14,F2+1.6,2],[6,F2+2.3,-2.8]],
+  ['Hành lang vòm',[-21.5,G0+1.6,-8.6],[10,G0+2.5,-8.6]],
+  ['Đôi rồng trên mái',[0,RIDGE_Y+2.8,-9],[0,RIDGE_Y+1.4,ZC],true],
+  ['Trên cầu Khánh Hội',[-112,10.2,-22],[0,6,-20],true],
+  ['Toàn cảnh trên cao (như ảnh flycam)',[46,30,58],[-4,5,-18],true]
+];
+function lookAtYP(from,to){ const dx=to[0]-from[0], dy=to[1]-from[1], dz=to[2]-from[2]; return [Math.atan2(-dx,-dz), Math.atan2(dy,Math.hypot(dx,dz))]; }
+function teleport(i){ const [,p,l,fly]=TP[i]; player.pos.set(...p); const [y,pt]=lookAtYP(p,l); player.yaw=y; player.pitch=pt; player.vel.set(0,0,0); if(fly && st.mode==='walk') setMode('fly'); }
+TP.forEach((t,i)=>{ const b=document.createElement('button'); b.className='tbtn'; b.id='tp'+i; b.textContent=t[0]; b.onclick=()=>{ teleport(i); closeMenu(); }; $('tpList').appendChild(b); });
+
+/* menu overlay */
+function openMenu(){ setShiftLock(false); $('start').hidden=false; $('startBtn').textContent= st.started?'Tiếp tục tham quan':'Bắt đầu tham quan'; }
+function closeMenu(){ $('start').hidden=true; st.started=true; canvas.focus(); updateFreeNote(); }
+$('startBtn').onclick=()=>closeMenu();
+// quick list of all exhibits in the menu
+EX_IDS.forEach(k=>{ const b=document.createElement('button'); b.className='tbtn'; b.textContent=exhibits[k].data.title; b.onclick=()=>{ closeMenu(); openInfo(k); }; $('exList').appendChild(b); });
+
+/* ---- Shift-lock: real pointer lock when the browser allows it, otherwise a soft lock that follows mouse movement ---- */
+st.shiftLock=false; st.resumeShift=false;
+function setShiftLock(on){
+  on=!!on && !st.touch && !st.panel;
+  st.shiftLock=on;
+  if(on){ try{ const r=canvas.requestPointerLock(); if(r && r.catch) r.catch(()=>{}); }catch(e){} }
+  else if(document.pointerLockElement) document.exitPointerLock();
+  drag=null; setPressed('bShift',on); canvas.classList.toggle('nocur',on); updateFreeNote(); st.target=undefined;
+}
+$('bShift').onclick=()=>setShiftLock(!st.shiftLock);
+document.addEventListener('pointerlockchange',()=>{
+  st.locked = document.pointerLockElement===canvas;
+  if(!st.locked && st.shiftLock){ st.shiftLock=false; setPressed('bShift',false); canvas.classList.remove('nocur'); } // Esc pressed by the browser
+  st.target=undefined; updateFreeNote();
+});
+function updateFreeNote(){
+  $('freeNote').hidden = !st.shiftLock || !!st.panel || !$('start').hidden;
+  $('cross').style.display = (st.shiftLock||st.touch)?'':'none';
+}
+
+/* info drawer */
+function openInfo(id){
+  const ex=exhibits[id]; if(!ex) return; const d=ex.data;
+  st.resumeShift = st.shiftLock;
+  if(st.shiftLock) setShiftLock(false);            // free the mouse
+  st.panel=id; drag=null; canvas.classList.remove('grab');
+  for(const k in keys) keys[k]=false; player.vel.set(0,0,0);
+  $('infoTag').textContent=d.tag; $('infoYear').textContent=d.year; $('infoTitle').textContent=d.title;
+  $('infoBody').innerHTML=''; d.body.forEach(t=>{ const p=document.createElement('p'); p.textContent=t; $('infoBody').appendChild(p); });
+  const dl=$('infoFacts'); dl.innerHTML=''; (d.facts||[]).forEach(([k,v])=>{ const dt=document.createElement('dt'); dt.textContent=k; const dd=document.createElement('dd'); dd.textContent=v; dl.append(dt,dd); });
+  dl.hidden=!(d.facts&&d.facts.length);
+  $('infoNote').textContent=d.note||''; $('infoNote').hidden=!d.note;
+  const s=$('infoSrc'); s.innerHTML='<span>Nguồn tham khảo</span>'; (d.src||[]).forEach(k=>{ const a=document.createElement('a'); a.href=SRC[k][1]; a.target='_blank'; a.rel='noopener'; a.textContent=SRC[k][0]; s.appendChild(a); });
+  $('infoScroll').scrollTop=0;
+  $('info').classList.add('open'); $('info').setAttribute('aria-hidden','false');
+  visited.add(id); saveVisited(); refreshProgress();
+  updateFreeNote(); $('aim').classList.remove('show'); $('tip').classList.remove('show');
+}
+function closeInfo(fromClick){
+  if(!st.panel) return; st.panel=null;
+  $('info').classList.remove('open'); $('info').setAttribute('aria-hidden','true');
+  canvas.focus({preventScroll:true});
+  if(fromClick && st.resumeShift) setShiftLock(true);
+  st.resumeShift=false; updateFreeNote();
+}
+$('closeInfo').onclick=()=>closeInfo(true);
+$('xInfo').onclick=()=>closeInfo(false);
+
+/* keyboard */
+const MOVE_KEYS=['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyE','KeyQ','KeyC','BracketLeft','BracketRight'];
+addEventListener('keydown',e=>{
+  if(e.target && (e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')) return;
+  if(st.panel){ if(e.code==='Escape'){ closeInfo(false); e.preventDefault(); } return; }
+  if(!$('start').hidden){ if(e.code==='Enter'&&document.activeElement===document.body){ closeMenu(); } return; }
+  if(MOVE_KEYS.includes(e.code)){ keys[e.code]=true; if(e.code==='Space'||e.code.startsWith('Arrow')) e.preventDefault(); }
+  if(e.repeat) return;
+  if((e.code==='BracketLeft'||e.code==='BracketRight') && st.mode==='walk') setMode('fly');
+  if(e.code==='ShiftLeft'||e.code==='ShiftRight') setShiftLock(!st.shiftLock);
+  else if(e.code==='Escape' && st.shiftLock) setShiftLock(false);
+  else if(e.code==='KeyG') setMode(st.mode==='fly'?'walk':'fly');
+  else if(e.code==='KeyN') toggleNoclip();
+  else if(e.code==='KeyR') toggleRoof();
+  else if(e.code==='KeyX') toggleXray();
+  else if(e.code==='KeyM'||e.code==='KeyH') openMenu();
+  else if(e.code==='KeyF' && st.target) openInfo(st.target);
+});
+addEventListener('keyup',e=>{ keys[e.code]=false; });
+addEventListener('blur',()=>{ for(const k in keys) keys[k]=false; });
+
+/* speed: mouse wheel */
+st.speedMul=1;
+function setSpeed(v){ st.speedMul=Math.max(0.4,Math.min(5,v)); $('speedTxt').textContent=st.speedMul.toFixed(1)+'×'; }
+canvas.addEventListener('wheel',e=>{ e.preventDefault(); setSpeed(st.speedMul*(e.deltaY<0?1.15:1/1.15)); },{passive:false});
+
+/* mouse: hold left button and drag to rotate; press on an exhibit to open it at once */
+const SENS=0.0022;
+let drag=null;
+function look(dx,dy){ player.yaw-=dx*SENS; player.pitch=Math.max(-1.55,Math.min(1.55,player.pitch-dy*SENS)); }
+function ndcOf(e){ const r=canvas.getBoundingClientRect(); return new T.Vector2((e.clientX-r.left)/r.width*2-1, -((e.clientY-r.top)/r.height)*2+1); }
+canvas.addEventListener('mousemove',e=>{
+  if(st.shiftLock){ look(e.movementX||0, e.movementY||0); return; }   // pointer lock or soft lock
+  st.mouse.copy(ndcOf(e)); st.mouseIn=true; st.mouseX=e.clientX; st.mouseY=e.clientY;
+  if(drag){ look((e.clientX-drag.x)*1.25,(e.clientY-drag.y)*1.25); drag.x=e.clientX; drag.y=e.clientY; }
+});
+canvas.addEventListener('mouseleave',()=>{ st.mouseIn=false; $('tip').classList.remove('show'); });
+canvas.addEventListener('mousedown',e=>{
+  if(e.button!==0 || st.panel || st.touch) return;
+  if(!st.started) st.started=true;
+  const id = st.shiftLock ? pick(new T.Vector2(0,0)) : pick(ndcOf(e));
+  if(id){ e.preventDefault(); openInfo(id); return; }
+  if(!st.shiftLock){ drag={x:e.clientX,y:e.clientY}; canvas.classList.add('grab'); }
+});
+addEventListener('mouseup',e=>{ if(e.button!==0) return; drag=null; canvas.classList.remove('grab'); });
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+
+/* touch */
+const stick={x:0,y:0,id:null}; const vb={up:false,down:false};
+if(matchMedia('(pointer:coarse)').matches || ('ontouchstart' in window && !matchMedia('(pointer:fine)').matches)){ st.touch=true; $('touch').hidden=false; $('cross').style.display=''; }
+{
+  const S=$('stick'), K=$('knob');
+  const set=(t)=>{ const r=S.getBoundingClientRect(); let dx=t.clientX-(r.left+r.width/2), dy=t.clientY-(r.top+r.height/2); const m=Math.hypot(dx,dy), R=r.width/2-10; if(m>R){ dx*=R/m; dy*=R/m; } stick.x=dx/R; stick.y=-dy/R; K.style.transform=`translate(${dx}px,${dy}px)`; };
+  S.addEventListener('touchstart',e=>{ const t=e.changedTouches[0]; stick.id=t.identifier; set(t); e.preventDefault(); },{passive:false});
+  S.addEventListener('touchmove',e=>{ for(const t of e.changedTouches) if(t.identifier===stick.id) set(t); e.preventDefault(); },{passive:false});
+  const end=e=>{ for(const t of e.changedTouches) if(t.identifier===stick.id){ stick.id=null; stick.x=stick.y=0; K.style.transform=''; } };
+  S.addEventListener('touchend',end); S.addEventListener('touchcancel',end);
+  for(const [id,k] of [['tUp','up'],['tDown','down']]){ const b=$(id); b.addEventListener('touchstart',e=>{ vb[k]=true; e.preventDefault(); },{passive:false}); b.addEventListener('touchend',()=>vb[k]=false); b.addEventListener('touchcancel',()=>vb[k]=false); }
+  let lt=null;
+  canvas.addEventListener('touchstart',e=>{ if(lt) return; const t=e.changedTouches[0]; lt={id:t.identifier,x:t.clientX,y:t.clientY,sx:t.clientX,sy:t.clientY,moved:false}; e.preventDefault(); },{passive:false});
+  canvas.addEventListener('touchmove',e=>{ for(const t of e.changedTouches){ if(lt && t.identifier===lt.id){ const dx=t.clientX-lt.x, dy=t.clientY-lt.y; if(Math.abs(t.clientX-lt.sx)+Math.abs(t.clientY-lt.sy)>8) lt.moved=true; look(dx*2.2,dy*2.2); lt.x=t.clientX; lt.y=t.clientY; } } e.preventDefault(); },{passive:false});
+  canvas.addEventListener('touchend',e=>{ for(const t of e.changedTouches){ if(lt && t.identifier===lt.id){ if(!lt.moved && !st.panel){ const r=canvas.getBoundingClientRect(); const ndc=new T.Vector2((t.clientX-r.left)/r.width*2-1, -((t.clientY-r.top)/r.height)*2+1); const id=pick(ndc); if(id) openInfo(id); } lt=null; } } });
+}
+
+/* ================= PHYSICS ================= */
+const overlaps=(c,x,y,z)=> x+HALF>c.min.x && x-HALF<c.max.x && z+HALF>c.min.z && z-HALF<c.max.z && y+HEIGHT>c.min.y && y<c.max.y;
+const freeAt=(x,y,z)=>{ for(const c of colliders) if(overlaps(c,x,y,z)) return false; return true; };
+function moveAxis(axis,d){
+  const p=player.pos; let x=p.x, y=p.y-EYE, z=p.z;
+  if(axis==='x') x+=d; else if(axis==='y') y+=d; else z+=d;
+  for(const c of colliders){
+    if(!overlaps(c,x,y,z)) continue;
+    if(axis==='y'){
+      if(d>0) y=c.min.y-HEIGHT-1e-4; else { y=c.max.y+1e-4; player.onGround=true; }
+      player.vel.y=0;
+    } else {
+      const sh=c.max.y-y;
+      if(sh>0 && sh<=0.46 && (st.mode==='fly'||player.onGround) && freeAt(x,c.max.y+2e-3,z)){ y=c.max.y+2e-3; continue; }
+      if(axis==='x') x = d>0 ? c.min.x-HALF-1e-4 : c.max.x+HALF+1e-4;
+      else z = d>0 ? c.min.z-HALF-1e-4 : c.max.z+HALF+1e-4;
+    }
+  }
+  p.set(x,y+EYE,z);
+}
+const fwd=new V3(), rgt=new V3(), wish=new V3();
+function updatePlayer(dt){
+  const k=keys, active=!st.panel && $('start').hidden;
+  let ix=0, iz=0, iy=0;
+  if(active){
+    ix=(k.KeyD||k.ArrowRight?1:0)-(k.KeyA||k.ArrowLeft?1:0)+stick.x;
+    iz=(k.KeyW||k.ArrowUp?1:0)-(k.KeyS||k.ArrowDown?1:0)+stick.y;
+    iy=(k.Space||k.KeyE||k.BracketRight||vb.up?1:0)-(k.KeyC||k.KeyQ||k.BracketLeft||vb.down?1:0);
+  }
+  const speed=5.2*st.speedMul*(st.noclip?1.5:1);
+  fwd.set(-Math.sin(player.yaw),0,-Math.cos(player.yaw)); rgt.set(Math.cos(player.yaw),0,-Math.sin(player.yaw));
+  wish.set(0,0,0).addScaledVector(fwd,iz).addScaledVector(rgt,ix); if(wish.lengthSq()>1) wish.normalize(); wish.multiplyScalar(speed);
+  const a=1-Math.exp(-10*dt);
+  player.vel.x+=(wish.x-player.vel.x)*a; player.vel.z+=(wish.z-player.vel.z)*a;
+  if(st.mode==='fly' || st.noclip){ player.vel.y+=((st.mode==='fly'||st.noclip?iy*speed:0)-player.vel.y)*a; }
+  else { player.vel.y-=22*dt; if(iy>0 && player.onGround) player.vel.y=7; if(player.vel.y<-40) player.vel.y=-40; }
+  if(st.noclip){ player.pos.addScaledVector(player.vel,dt); }
+  else {
+    const dx=player.vel.x*dt, dy=player.vel.y*dt, dz=player.vel.z*dt;
+    const n=Math.max(1,Math.ceil(Math.max(Math.abs(dx),Math.abs(dy),Math.abs(dz))/0.15));
+    if(st.mode==='walk') player.onGround=false;
+    for(let i=0;i<n;i++){ moveAxis('x',dx/n); moveAxis('z',dz/n); moveAxis('y',dy/n); }
+  }
+  const p=player.pos; p.x=Math.max(-380,Math.min(380,p.x)); p.z=Math.max(-240,Math.min(290,p.z)); p.y=Math.max(-8,Math.min(220,p.y));
+}
+
+/* ================= PICKING ================= */
+const ray=new T.Raycaster(); ray.far=80;
+const _v=new V3(), _d=new V3();
+function pick(ndc){
+  ray.setFromCamera(ndc,camera); ray.far=80;
+  const hits=ray.intersectObjects(rayList,false);
+  for(const h of hits){ const id=h.object.userData.ex; if(id) return id; if(h.object.material && h.object.material.transparent && h.object.material.opacity<0.3) continue; break; }
+  // fallback: nearest diamond marker within ~45 px of the pointer, if nothing blocks it
+  const W=canvas.clientWidth, H=canvas.clientHeight; let best=null, bd=45;
+  for(const k of EX_IDS){ const m=exhibits[k].marker; if(!m.visible) continue;
+    _v.copy(m.position); const dist=_v.distanceTo(camera.position); if(dist>60) continue;
+    _v.project(camera); if(_v.z>1||_v.z<-1) continue;
+    const px=Math.hypot((_v.x-ndc.x)*W/2,(_v.y-ndc.y)*H/2); if(px>=bd) continue;
+    _d.copy(m.position).sub(camera.position).normalize(); ray.set(camera.position,_d); ray.far=dist-0.4;
+    const block=ray.intersectObjects(rayList,false).find(h=>!(h.object.userData.ex===k) && !(h.object.material&&h.object.material.transparent&&h.object.material.opacity<0.3));
+    if(block) continue; best=k; bd=px; }
+  return best;
+}
+const HL=new T.Color();
+function setHighlight(id,t){
+  for(const k of EX_IDS){ const ex=exhibits[k], on=(k===id);
+    const v=on?0.35+0.25*Math.sin(t*6):0; HL.setRGB(0.85*v,0.55*v,0.15*v);
+    for(const m of ex.mats){ if(m.emissive && (on || ex._hl)) m.emissive.copy(HL); }
+    ex._hl=on;
+    ex.marker.scale.setScalar(on?0.75:0.55);
+  }
+}
+
+/* ================= MINIMAP ================= */
+const mm=$('minimap').getContext('2d');
+const MS=3.4, MCX=0, MCZ=-14;
+function mx(x){ return 168+(x-MCX)*MS; } function mz(z){ return 168+(z-MCZ)*MS; }
+function drawMap(){
+  const c=mm; c.clearRect(0,0,336,336);
+  c.fillStyle='rgba(82,110,64,.55)'; c.fillRect(0,0,336,336);
+  c.fillStyle='rgba(60,95,92,.9)'; c.fillRect(0,0,336,mz(-52)); c.beginPath(); c.moveTo(mx(-48),mz(-52)); c.lineTo(mx(-200),mz(100)); c.lineTo(mx(-260),mz(100)); c.lineTo(mx(-260),mz(-60)); c.closePath(); c.fill();
+  c.fillStyle='rgba(59,61,64,.95)'; c.fillRect(mx(-90),mz(50),300*MS,12*MS);
+  c.fillStyle='rgba(150,120,80,.9)'; c.fillRect(mx(-28),mz(-57.2),56*MS,5.2*MS);
+  c.fillStyle='rgba(40,30,24,.9)'; c.fillRect(mx(-25),mz(-69),30*MS,8*MS);
+  c.fillStyle='rgba(190,180,160,.6)'; c.fillRect(mx(-25),mz(-46),50*MS,33*MS); c.fillRect(mx(-90),mz(-51.6),230*MS,5.6*MS);
+  c.fillStyle='rgba(236,159,134,.95)'; c.fillRect(mx(-23.3),mz(-10.3),46.6*MS,20.6*MS);
+  c.fillStyle='rgba(241,226,182,.95)'; c.fillRect(mx(-20.2),mz(-7.2),40.4*MS,14.4*MS);
+  c.strokeStyle='rgba(60,40,20,.8)'; c.lineWidth=2; c.beginPath(); c.moveTo(mx(-6),mz(-7)); c.lineTo(mx(-6),mz(7)); c.moveTo(mx(6),mz(-7)); c.lineTo(mx(6),mz(7)); c.stroke();
+  c.fillStyle='rgba(110,80,50,.9)'; c.fillRect(mx(-5),mz(-6.8),10*MS,1.6*MS);
+  c.fillStyle='rgba(122,58,44,.95)'; c.beginPath(); c.arc(mx(0),mz(-28),4*MS,0,7); c.fill();
+  c.strokeStyle='rgba(120,190,200,.9)'; c.lineWidth=3; c.beginPath(); c.arc(mx(0),mz(24),3.6*MS,0,7); c.stroke();
+  c.fillStyle='rgba(205,140,90,.9)'; c.fillRect(mx(27),mz(-9),31*MS,13*MS);
+  const fy=player.pos.y-EYE; const floor = fy<SL0-0.2?0:(fy<EAVE?1:2);
+  for(const k of EX_IDS){ const p=exhibits[k].pos; const ef = p.y<SL0?0:(p.y<EAVE+1?1:2); const same=(ef===floor)||(floor===0&&ef===0);
+    c.globalAlpha= same?1:0.35; c.fillStyle=visited.has(k)?'#73b8a3':'#e2ab47'; c.beginPath(); c.arc(mx(p.x),mz(p.z),k===st.target?6:4,0,7); c.fill(); }
+  c.globalAlpha=1;
+  const px=Math.max(8,Math.min(328,mx(player.pos.x))), pz=Math.max(8,Math.min(328,mz(player.pos.z)));
+  c.save(); c.translate(px,pz); c.rotate(-player.yaw);
+  c.fillStyle='rgba(236,227,207,.18)'; c.beginPath(); c.moveTo(0,0); c.arc(0,0,40,-Math.PI/2-0.6,-Math.PI/2+0.6); c.closePath(); c.fill();
+  c.fillStyle='#fff'; c.strokeStyle='#0d1719'; c.lineWidth=2; c.beginPath(); c.moveTo(0,-11); c.lineTo(7,8); c.lineTo(0,4); c.lineTo(-7,8); c.closePath(); c.fill(); c.stroke(); c.restore();
+  c.fillStyle='rgba(236,227,207,.85)'; c.font='600 18px "Be Vietnam Pro", sans-serif'; c.fillText('Sông Sài Gòn ↑',10,24);
+}
+function floorName(){
+  const p=player.pos, fy=p.y-EYE, inB=Math.abs(p.x)<23.4 && Math.abs(p.z)<10.4;
+  if(inB){ if(fy<SL0-0.1) return 'Trong nhà · Tầng 1'; if(fy<EAVE) return 'Trong nhà · Tầng 2'; return fy<RIDGE_Y+0.5?'Dưới mái · khung kèo':'Trên mái'; }
+  if(p.z<-52) return fy<-0.5?'Dưới nước':'Bờ sông · cầu tàu';
+  if(p.z<-46) return 'Đường dạo ven sông';
+  if(p.z<-10.4 && Math.abs(p.x)<26) return 'Sân tượng đài (phía sông)';
+  if(fy>14) return 'Trên cao';
+  if(p.z>47) return 'Đường Nguyễn Tất Thành';
+  return 'Khuôn viên';
+}
+
+/* ================= LOOP ================= */
+addEventListener('resize',()=>{ renderer.setSize(innerWidth,innerHeight,false); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); });
+const clock=new T.Clock(); let frame=0, tAcc=0;
+const wp=water.geometry.attributes.position, wb=water.userData.base;
+const vx=$('vx'), vy=$('vy'), vz=$('vz'), fl=$('floorLbl'), aim=$('aim'), aimName=$('aimName'), cross=$('cross'), tip=$('tip'), tipTxt=$('tipTxt');
+const center=new T.Vector2(0,0);
+updateFreeNote(); updateModeChip();
+scene.traverse(o=>{ if(o.isInstancedMesh) o.frustumCulled=false; });
+function tick(){
+  requestAnimationFrame(tick);
+  const dt=Math.min(clock.getDelta(),0.05); tAcc+=dt; frame++;
+  updatePlayer(dt); updateFountain(dt); updateFlags(tAcc);
+  camera.position.copy(player.pos); camera.rotation.set(player.pitch,player.yaw,0);
+  // water
+  for(let i=0;i<wp.count;i++){ const x=wb[i*3], z=wb[i*3+2]; wp.setY(i, Math.sin(x*0.09+tAcc*1.1)*0.11 + Math.sin(z*0.14+tAcc*0.8+x*0.02)*0.09); }
+  wp.needsUpdate=true; if(frame%4===0) water.geometry.computeVertexNormals();
+  // markers
+  EX_IDS.forEach((k,i)=>{ const m=exhibits[k].marker; m.position.y=m.userData.baseY+Math.sin(tAcc*2+i)*0.12; });
+  // aim
+  let id=null;
+  if(!st.panel && $('start').hidden){
+    if(st.shiftLock || st.touch) id=(frame%2===0)?pick(center):st.target;
+    else if(st.mouseIn && !drag) id=(frame%2===0)?pick(st.mouse):st.target;
+  }
+  if(id!==st.target){ st.target=id; aim.classList.toggle('show',!!id && (st.shiftLock||st.touch)); if(id){ aimName.textContent=exhibits[id].data.title; tipTxt.textContent=exhibits[id].data.title+' · bấm để xem'; } cross.classList.toggle('on',!!id); canvas.classList.toggle('hov',!!id && !st.shiftLock); }
+  const showTip=!!st.target && !st.shiftLock && !st.touch && st.mouseIn && !drag && !st.panel;
+  tip.classList.toggle('show',showTip); if(showTip) tip.style.transform=`translate(${st.mouseX+16}px,${st.mouseY+18}px)`;
+  setHighlight(st.target,tAcc);
+  if(frame%3===0){ drawMap(); const fy=player.pos.y-EYE; vx.textContent=player.pos.x.toFixed(1); vy.textContent=fy.toFixed(1); vz.textContent=player.pos.z.toFixed(1); fl.textContent=floorName(); }
+  renderer.render(scene,camera);
+}
+tick();
+window.__nr={player,st,exhibits,teleport,openInfo,closeInfo,colliders,pick,setShiftLock};
+})();
+</script>
+
+</body>
+</html>
